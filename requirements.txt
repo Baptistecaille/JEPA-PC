@@ -1,0 +1,7 @@
+# Requirements for PC-JEPA — Google Colab GPU
+# jax[cuda12] and jaxlib are pre-installed on Colab GPU runtime
+
+optax>=0.2.0
+numpy
+matplotlib
+tqdm
