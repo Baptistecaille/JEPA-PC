@@ -85,7 +85,7 @@ def run_exp3(config: ModelConfig, data_config: DataConfig = None) -> dict:
             r = run_ablation(name, config, data_config, train_fn, test_fn)
             results[name] = r
             print(f"    nmse={r.get('nmse', '?'):.4f}  "
-                  f"collapse={r.get('collapse_score', '?'):.4f}")
+                  f"collapse_ctx={r.get('collapse_ctx', '?'):.4f}")
         except Exception as e:
             print(f"    [ERREUR] {e}")
             results[name] = {}
@@ -101,6 +101,6 @@ def _print_ablation_summary(results: dict) -> None:
     print("-" * 48)
     for name, r in results.items():
         nmse_v = r.get('nmse', float('nan'))
-        coll_v = r.get('collapse_score', float('nan'))
+        coll_v = r.get('collapse_ctx', float('nan'))
         print(f"{name:<25}  {nmse_v:>8.4f}  {coll_v:>10.4f}")
     print("=" * 60)

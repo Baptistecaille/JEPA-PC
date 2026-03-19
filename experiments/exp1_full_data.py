@@ -59,7 +59,7 @@ def run_exp1(config: ModelConfig, data_config: DataConfig = None) -> dict:
     print("\n[Exp1] Évaluation sur le test set...")
     test_metrics = evaluate(state, test_fn, config, n_batches=100)
     print(f"  NMSE={test_metrics.get('nmse', 0):.4f}  "
-          f"collapse={test_metrics.get('collapse_score', 0):.4f}")
+          f"collapse_ctx={test_metrics.get('collapse_ctx', 0):.4f}")
 
     return {
         'final_metrics': test_metrics,

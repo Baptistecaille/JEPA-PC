@@ -235,18 +235,21 @@ def run_exp2(config: ModelConfig, data_config: DataConfig = None) -> dict:
 
 
 def _print_summary(results: dict) -> None:
-    """Affiche un résumé des résultats moyennés par n."""
+    """Affiche un résumé des résultats moyennés par n, avec T_conv."""
     import numpy as np
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 58)
     print("RÉSUMÉ — NMSE moyen sur les seeds")
-    print(f"{'n':>8}  {'PC-JEPA':>10}  {'Transformer':>12}")
-    print("-" * 35)
+    print(f"{'n':>8}  {'PC-JEPA NMSE':>14}  {'T_conv_mean':>12}  {'Transformer NMSE':>16}")
+    print("-" * 58)
     for n in EFFICIENCY_NS:
-        pc_vals  = [results.get(f'pc_jepa_n{n}_seed{s}',{}).get('nmse', float('nan'))
-                    for s in SEEDS]
-        tr_vals  = [results.get(f'transformer_n{n}_seed{s}',{}).get('nmse', float('nan'))
-                    for s in SEEDS]
-        pc_mean  = np.nanmean(pc_vals)
-        tr_mean  = np.nanmean(tr_vals)
-        print(f"{n:>8}  {pc_mean:>10.4f}  {tr_mean:>12.4f}")
-    print("=" * 60)
+        pc_vals    = [results.get(f'pc_jepa_n{n}_seed{s}', {}).get('nmse', float('nan'))
+                      for s in SEEDS]
+        tconv_vals = [results.get(f'pc_jepa_n{n}_seed{s}', {}).get('T_conv_mean', float('nan'))
+                      for s in SEEDS]
+        tr_vals    = [results.get(f'transformer_n{n}_seed{s}', {}).get('nmse', float('nan'))
+                      for s in SEEDS]
+        pc_mean    = np.nanmean(pc_vals)
+        tconv_mean = np.nanmean(tconv_vals)
+        tr_mean    = np.nanmean(tr_vals)
+        print(f"{n:>8}  {pc_mean:>14.4f}  {tconv_mean:>12.1f}  {tr_mean:>16.4f}")
+    print("=" * 58)

@@ -176,10 +176,18 @@ def inference_step_fn(
 
 def compute_max_error(state: PCHierarchyState) -> jnp.ndarray:
     """
-    Critère de convergence : max de ||ε^l||_inf sur tous les niveaux et batch.
+    Critère de convergence : MSE moyen sur toutes les erreurs de prédiction.
+
+    Remplace le L∞ (jnp.max(jnp.abs(errors))) qui imposait que les 24 576
+    scalaires (L=3, B=32, d_z=256) soient simultanément < pc_tol — condition
+    virtuellement impossible en pratique, causant T_conv = pc_max_iter systématique.
+
+    Le MSE est cohérent avec la loss JEPA et converge vers des valeurs O(1e-4)
+    atteignables avec pc_max_iter=100 et pc_alpha=0.1.
+
     Scalaire float32.
     """
-    return jnp.max(jnp.abs(state.errors))
+    return jnp.mean(state.errors ** 2)
 
 
 def run_inference_loop(
@@ -215,6 +223,39 @@ def run_inference_loop(
     init_carry = (init_state, jnp.int32(0), jnp.array(jnp.inf, dtype=jnp.float32))
     final_state, T_conv, final_err = jax.lax.while_loop(cond_fn, body_fn, init_carry)
     return final_state, T_conv, final_err
+
+
+def run_inference_loop_debug(
+    init_state: 'PCHierarchyState',
+    weights: 'PCWeights',
+    obs_embedding: jnp.ndarray,
+    config: ModelConfig,
+) -> Tuple['PCHierarchyState', int, list]:
+    """
+    Variante debug de run_inference_loop — NON JIT-compilable.
+    Retourne l'historique des erreurs MSE à chaque itération.
+
+    À utiliser uniquement pour l'analyse et la validation du critère de
+    convergence (exp4, notebooks). Ne jamais appeler depuis train_step.
+
+    Returns:
+        converged_state : PCHierarchyState après convergence
+        T_conv          : int — nb d'itérations effectuées
+        error_history   : list[float] — erreur MSE à chaque pas
+    """
+    state = init_state
+    error_history = []
+
+    for t in range(config.pc_max_iter):
+        err = float(compute_max_error(state))
+        error_history.append(err)
+        if err <= config.pc_tol:
+            return state, t, error_history
+        state = inference_step_fn(state, weights, obs_embedding, config.pc_alpha)
+
+    err = float(compute_max_error(state))
+    error_history.append(err)
+    return state, config.pc_max_iter, error_history
 
 
 # ---------------------------------------------------------------------------

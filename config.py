@@ -23,8 +23,8 @@ class ModelConfig(NamedTuple):
     # Predictive Coding
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
     pc_alpha:     float = 0.1     # lr de la boucle d'inférence
-    pc_tol:       float = 1e-3    # critère d'arrêt de convergence
-    pc_max_iter:  int   = 20      # nb max d'itérations d'inférence
+    pc_tol:       float = 1e-4    # critère MSE d'arrêt (MSE << L∞, seuil adapté)
+    pc_max_iter:  int   = 100     # nb max d'itérations — laisser converger réellement
 
     # Predictor (GRU + MLP)
     pred_hidden:  int   = 256     # dim hidden du GRU

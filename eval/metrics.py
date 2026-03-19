@@ -83,14 +83,23 @@ def compute_all_metrics(
     z_target  : (B, K, d_z)
     pc_state  : PCHierarchyState
     T_conv    : scalaire ou (B,)
+
+    Deux collapse scores distincts :
+      collapse_pred : structuration de l'espace des prédictions (predictor)
+      collapse_ctx  : richesse de l'espace encodé (encodeur, niveau 0 PC) ← principal
+    Mesurer le collapse sur z_pred au lieu de z_ctx était sémantiquement inversé :
+    un z_pred bruité (petit n) donne un spectre plat → score ≈ 0 même si l'encodeur
+    est en collapse, masquant le vrai problème.
     """
-    z_flat = z_pred.reshape(-1, z_pred.shape[-1])   # (B*K, d_z)
+    z_pred_flat = z_pred.reshape(-1, z_pred.shape[-1])   # (B*K, d_z)
+    z_ctx_flat  = pc_state.representations[0]             # (B, d_z) — niveau 0 = encodeur
 
     return {
-        'nmse':           nmse(z_pred, z_target),
-        'collapse_score': collapse_score(z_flat),
-        'T_conv_mean':    jnp.mean(jnp.array(T_conv, dtype=jnp.float32)),
-        'T_conv_max':     jnp.max(jnp.array(T_conv, dtype=jnp.float32)),
+        'nmse':          nmse(z_pred, z_target),
+        'collapse_pred': collapse_score(z_pred_flat),    # structuration des prédictions
+        'collapse_ctx':  collapse_score(z_ctx_flat),     # richesse espace encodé ← principal
+        'T_conv_mean':   jnp.mean(jnp.array(T_conv, dtype=jnp.float32)),
+        'T_conv_max':    jnp.max(jnp.array(T_conv, dtype=jnp.float32)),
     }
 
 
