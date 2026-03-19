@@ -150,7 +150,7 @@ def _train_transformer(
             break
         z_context  = apply_encoder(enc_w, jnp.array(batch.context))
         z_target   = apply_encoder(enc_w, jnp.array(batch.target))
-        z_pred     = apply_transformer_predictor(trans_w, z_context)
+        z_pred     = apply_transformer_predictor(trans_w, z_context, local_config)
         z_target_k = z_target[:, :local_config.pred_K, :]
         all_nmse.append(float(nmse(z_pred, z_target_k)))
 

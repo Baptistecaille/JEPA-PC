@@ -53,15 +53,16 @@ def _multi_head_attention(
     weights: dict,
     layer_idx: int,
     x: jnp.ndarray,
+    n_heads: int,
 ) -> jnp.ndarray:
     """
     Multi-head attention.
-    x : (B, T, d_model)
+    x      : (B, T, d_model)
+    n_heads : Python int — passé explicitement, pas stocké dans weights
     return : (B, T, d_model)
     """
     B, T, d_model = x.shape
     prefix = f'layer{layer_idx}_attn'
-    n_heads = weights[f'{prefix}_n_heads']
     d_head  = d_model // n_heads
 
     Q = x @ weights[f'{prefix}_Wq'] + weights[f'{prefix}_bq']   # (B, T, d_model)
@@ -104,17 +105,18 @@ def _transformer_layer(
     weights: dict,
     layer_idx: int,
     x: jnp.ndarray,
+    n_heads: int,
 ) -> jnp.ndarray:
     """
     Une couche Transformer : MHA + FFN avec connexions résiduelles et LayerNorm.
-    x : (B, T, d_model)
+    x       : (B, T, d_model)
+    n_heads : Python int — passé explicitement
     """
     prefix_ln = f'layer{layer_idx}_ln'
-    # Pre-norm (plus stable à l'entraînement)
     x_norm = _layer_norm(
         x, weights[f'{prefix_ln}1_scale'], weights[f'{prefix_ln}1_bias']
     )
-    x = x + _multi_head_attention(weights, layer_idx, x_norm)
+    x = x + _multi_head_attention(weights, layer_idx, x_norm, n_heads)
 
     x_norm = _layer_norm(
         x, weights[f'{prefix_ln}2_scale'], weights[f'{prefix_ln}2_bias']
@@ -130,34 +132,31 @@ def _transformer_layer(
 def init_transformer_predictor(
     key: jax.random.PRNGKey,
     config: ModelConfig,
-    n_layers: int = 4,
-    n_heads: int  = 4,
-    ffn_dim: int  = 512,
 ) -> dict:
     """
     Initialise les poids du Transformer predictor.
+    Architecture lue depuis config (R7 — pas de magic numbers).
+    n_heads et n_layers ne sont PAS stockés dans le dict weights :
+    ils seraient traités comme des paramètres différentiables par JAX/optax.
     d_model = config.d_z pour cohérence avec l'encoder.
     """
     weights = {}
-    d_model = config.d_z
-    d_head  = d_model // n_heads
-    K       = config.pred_K
-    ke      = config.pred_k_embed
+    n_layers = config.trans_n_layers
+    n_heads  = config.trans_n_heads
+    ffn_dim  = config.trans_ffn_dim
+    d_model  = config.d_z
+    K        = config.pred_K
+    ke       = config.pred_k_embed
 
     std_attn = jnp.sqrt(2.0 / d_model)
 
     for l in range(n_layers):
-        # --- Attention ---
+        # --- Attention (SANS n_heads dans le dict — évite l'erreur int32 grad) ---
         prefix = f'layer{l}_attn'
-        weights[f'{prefix}_n_heads'] = n_heads   # stocké pour apply
-        for proj, dim_out in [('Wq', d_model), ('Wk', d_model),
-                               ('Wv', d_model), ('Wo', d_model)]:
+        for proj in ['Wq', 'Wk', 'Wv', 'Wo']:
             key, sk = jax.random.split(key)
             weights[f'{prefix}_{proj}'] = (
-                jax.random.normal(sk, (d_model, dim_out)) * std_attn
-            )
-            weights[f'{prefix}_{proj[1]}' + proj[1:].replace(proj[0], 'b')] = (
-                jnp.zeros((dim_out,))
+                jax.random.normal(sk, (d_model, d_model)) * std_attn
             )
         for bname in ['bq', 'bk', 'bv', 'bo']:
             weights[f'{prefix}_{bname}'] = jnp.zeros((d_model,))
@@ -210,13 +209,16 @@ def init_transformer_predictor(
 def apply_transformer_predictor(
     weights: dict,
     z_context: jnp.ndarray,
+    config: ModelConfig,
 ) -> jnp.ndarray:
     """
     z_context : (B, T_in, d_z)
+    config    : ModelConfig — fournit n_layers et n_heads (non stockés dans weights)
     return    : (B, K, d_z)
     """
     B, T, d_model = z_context.shape
-    n_layers = sum(1 for k in weights if k.startswith('layer') and k.endswith('_n_heads'))
+    n_layers = config.trans_n_layers
+    n_heads  = config.trans_n_heads
 
     # Positional encoding
     pos = weights['pos_embed'][:T]   # (T, d_model)
@@ -224,7 +226,7 @@ def apply_transformer_predictor(
 
     # Couches Transformer
     for l in range(n_layers):
-        x = _transformer_layer(weights, l, x)
+        x = _transformer_layer(weights, l, x, n_heads)
 
     # Pooling : on utilise le dernier token comme représentation contexte
     h_T = x[:, -1, :]   # (B, d_model)
@@ -305,7 +307,7 @@ def make_transformer_train_step(
                 apply_encoder(enc_w, batch.target)
             )
 
-            z_pred = apply_transformer_predictor(trans_w, z_context)
+            z_pred = apply_transformer_predictor(trans_w, z_context, config)
             z_target_k = z_target[:, :config.pred_K, :]
 
             l_j = loss_jepa(z_pred, z_target_k)
