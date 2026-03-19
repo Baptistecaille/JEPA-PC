@@ -37,6 +37,11 @@ class ModelConfig(NamedTuple):
     lambda_var: float = 0.01      # poids L_var
     gamma_var:  float = 1.0       # variance cible (anti-collapse)
 
+    # Transformer baseline (parité paramètres avec PC-JEPA predictor ~930K)
+    trans_n_layers: int = 1       # 1 couche → ~930K params (parité avec GRU+MLP)
+    trans_n_heads:  int = 4       # têtes d'attention (d_z doit être divisible)
+    trans_ffn_dim:  int = 256     # dim FFN interne (réduit pour parité)
+
     # Optimisation (Boucle 2)
     learning_rate: float = 3e-4
     n_epochs:      int   = 100
