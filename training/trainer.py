@@ -27,7 +27,8 @@ from models.pc_nodes import (
     PCWeights, init_pc_weights, init_pc_from_encoding, run_inference_loop,
     pc_weights_to_flat_dict, flat_dict_to_pc_weights,
 )
-from training.losses import total_loss, loss_jepa
+from training.losses import loss_jepa, loss_variance
+from models.pc_nodes import free_energy
 from data.moving_mnist import Batch, DataConfig
 
 
@@ -117,41 +118,62 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
         pc_w   = flat_dict_to_pc_weights(state.pc_weights_flat, config)
 
         def loss_fn(all_weights):
-            enc_w_  = all_weights['enc']
-            pred_w_ = all_weights['pred']
+            enc_w_   = all_weights['enc']
+            pred_w_  = all_weights['pred']
             pc_flat_ = all_weights['pc']
-            pc_w_   = flat_dict_to_pc_weights(pc_flat_, config)
+            pc_w_    = flat_dict_to_pc_weights(pc_flat_, config)
 
             # Étape 1 — Encodage contexte
             z_context = apply_encoder(enc_w_, batch.context)   # (B, T_in, d_z)
+            obs = z_context[:, -1, :]                           # (B, d_z)
 
             # Étape 2 — Encodage cible avec STOP GRADIENT (R3)
             z_target = jax.lax.stop_gradient(
-                apply_encoder(enc_w_, batch.target)            # (B, T_pred, d_z)
+                apply_encoder(enc_w_, batch.target)             # (B, T_pred, d_z)
             )
 
             # Étape 3 — Boucle 1 : inférence PC (poids figés, états libres)
-            init_pc_state = init_pc_from_encoding(
-                z_context[:, -1, :], pc_w_, config
+            # CRITIQUE : jax.lax.while_loop ne supporte pas le reverse-mode autodiff.
+            # On applique stop_gradient sur tout le résultat de la boucle d'inférence.
+            # Le gradient des poids PC (Boucle 2) est calculé séparément via
+            # free_energy(sg(x*), W, sg(obs)) — règle de Hebb, pas backprop dans la boucle.
+            init_pc_state = init_pc_from_encoding(obs, pc_w_, config)
+            pc_converged, T_conv, final_err = jax.lax.stop_gradient(
+                run_inference_loop(init_pc_state, pc_w_, obs, config)
             )
-            pc_converged, T_conv, final_err = run_inference_loop(
-                init_pc_state, pc_w_, z_context[:, -1, :], config
+
+            # Étape 3b — Perte PC : gradient w.r.t. W via F(sg(x*), W, sg(obs))
+            # x* et obs sont stop_gradient ; W_pred apparaît explicitement dans F.
+            # C'est la règle d'apprentissage Hebbienne du Predictive Coding.
+            l_pc = free_energy(
+                pc_converged,                      # x* déjà stop_gradient (ligne ci-dessus)
+                pc_w_,                             # W — gradient autorisé
+                jax.lax.stop_gradient(obs),        # obs figé
             )
 
             # Étape 4 — Prédiction dans l'espace latent
             z_pred = apply_predictor(pred_w_, z_context)   # (B, K, d_z)
 
-            # Aligner les horizons (T_pred peut être > K)
+            # Aligner les horizons
             K = config.pred_K
-            z_target_k = z_target[:, :K, :]               # (B, K, d_z)
+            z_target_k = z_target[:, :K, :]                # (B, K, d_z)
 
-            # Étape 5 — Pertes
-            loss, loss_details = total_loss(
-                all_weights, pc_converged, z_pred, z_target_k, config
+            # Étape 5 — Pertes combinées
+            l_jepa = loss_jepa(z_pred, z_target_k)
+            l_var  = loss_variance(
+                z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var
             )
+            total = l_jepa + config.lambda_pc * l_pc + config.lambda_var * l_var
 
-            aux = {**loss_details, 'T_conv': T_conv, 'pc_error': final_err}
-            return loss, aux
+            aux = {
+                'loss_total': total,
+                'loss_jepa':  l_jepa,
+                'loss_pc':    l_pc,
+                'loss_var':   l_var,
+                'T_conv':     T_conv,
+                'pc_error':   final_err,
+            }
+            return total, aux
 
         all_weights = {
             'enc':  enc_w,

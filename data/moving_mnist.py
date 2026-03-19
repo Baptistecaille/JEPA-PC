@@ -45,12 +45,21 @@ class Batch(NamedTuple):
 # Génération procédurale de Moving MNIST
 # ---------------------------------------------------------------------------
 
+# Cache module-level : MNIST chargé une seule fois par processus
+_MNIST_DIGITS_CACHE: np.ndarray | None = None
+
+
 def _load_mnist_digits(rng: np.random.Generator) -> np.ndarray:
     """
     Retourne les chiffres MNIST.
-    Télécharge via keras si disponible, sinon génère des placeholders carrés.
+    Télécharge via keras si disponible, sinon génère des placeholders.
+    Résultat mis en cache globalement pour éviter les re-téléchargements.
     Shape : (N, 28, 28) uint8
     """
+    global _MNIST_DIGITS_CACHE
+    if _MNIST_DIGITS_CACHE is not None:
+        return _MNIST_DIGITS_CACHE
+
     try:
         import tensorflow as tf
         (x_train, _), (x_test, _) = tf.keras.datasets.mnist.load_data()
@@ -66,7 +75,9 @@ def _load_mnist_digits(rng: np.random.Generator) -> np.ndarray:
             # Fallback : carrés synthétiques (tests unitaires / CI sans internet)
             print("[WARNING] MNIST non disponible — utilisation de placeholders synthétiques.")
             digits = rng.integers(0, 255, size=(1000, 28, 28), dtype=np.uint8)
-    return digits.astype(np.uint8)
+
+    _MNIST_DIGITS_CACHE = digits.astype(np.uint8)
+    return _MNIST_DIGITS_CACHE
 
 
 def _generate_sequence(
@@ -230,8 +241,9 @@ def run_sanity_checks(config: DataConfig) -> None:
     assert batch.target.max()  <= 1.0, f"[D2] target max > 1"
     print("  [D2] ✓ valeurs dans [0, 1]")
 
-    # [D3] context ≠ target (séquences temporellement distinctes)
-    assert not np.allclose(batch.context, batch.target[:, :test_cfg.T_in]), \
+    # [D3] context ≠ target — frames temporellement distinctes
+    # On compare la première frame du contexte vs la première frame de la cible
+    assert not np.allclose(batch.context[:, 0], batch.target[:, 0]), \
         "[D3] context et target semblent identiques"
     print("  [D3] ✓ context et target temporellement distincts")
 
