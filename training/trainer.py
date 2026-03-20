@@ -152,7 +152,7 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             )
 
             # Étape 4 — Prédiction dans l'espace latent
-            z_pred = apply_predictor(pred_w_, z_context)   # (B, K, d_z)
+            z_pred = apply_predictor(pred_w_, z_context, config)   # (B, K, d_z)
 
             # Aligner les horizons
             K = config.pred_K
@@ -235,7 +235,7 @@ def evaluate(
             init_pc_state, pc_w, z_context[:, -1, :], config
         )
 
-        z_pred = apply_predictor(pred_w, z_context)
+        z_pred = apply_predictor(pred_w, z_context, config)
         z_target_k = z_target[:, :config.pred_K, :]
 
         metrics = compute_all_metrics(z_pred, z_target_k, pc_converged, T_conv)

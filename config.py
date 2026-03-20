@@ -26,8 +26,7 @@ class ModelConfig(NamedTuple):
     pc_tol:       float = 1e-4    # critère MSE d'arrêt (MSE << L∞, seuil adapté)
     pc_max_iter:  int   = 100     # nb max d'itérations — laisser converger réellement
 
-    # Predictor (GRU + MLP)
-    pred_hidden:  int   = 256     # dim hidden du GRU
+    # Predictor (Transformer + MLP)
     pred_k_embed: int   = 16      # dim embedding de l'horizon k
     pred_mlp_dim: int   = 512     # dim couches cachées MLP head
     pred_K:       int   = 5       # horizon max de prédiction
@@ -37,10 +36,10 @@ class ModelConfig(NamedTuple):
     lambda_var: float = 0.01      # poids L_var
     gamma_var:  float = 1.0       # variance cible (anti-collapse)
 
-    # Transformer baseline (parité paramètres avec PC-JEPA predictor ~930K)
-    trans_n_layers: int = 1       # 1 couche → ~930K params (parité avec GRU+MLP)
+    # Transformer (predictor PC-JEPA et baseline partagent ces hyperparamètres)
+    trans_n_layers: int = 1       # 1 couche → ~935K params (parité ≤25%)
     trans_n_heads:  int = 4       # têtes d'attention (d_z doit être divisible)
-    trans_ffn_dim:  int = 256     # dim FFN interne (réduit pour parité)
+    trans_ffn_dim:  int = 256     # dim FFN interne
 
     # Optimisation (Boucle 2)
     learning_rate: float = 3e-4
