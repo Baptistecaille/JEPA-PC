@@ -55,7 +55,7 @@ def measure_tconv(state, config, data_config, n):
 
 
 def run_check():
-    config      = ModelConfig(seed=SEED, pc_max_iter=100, pc_tol=1e-4)
+    config      = ModelConfig(seed=SEED, pc_max_iter=100)
     data_config = DataConfig(seed=SEED, batch_size=16)
 
     print("=" * 62)
@@ -70,7 +70,7 @@ def run_check():
 
         # Entraînement court
         loader_fn = get_subset_dataloader(data_config, n_samples=n, seed=SEED)
-        local_cfg = ModelConfig(seed=SEED, pc_max_iter=100, pc_tol=1e-4)
+        local_cfg = ModelConfig(seed=SEED, pc_max_iter=100)
         state     = create_train_state(local_cfg)
         optimizer = _build_optimizer(local_cfg)
         step_fn   = make_train_step(local_cfg, optimizer)
