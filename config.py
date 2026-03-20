@@ -22,8 +22,8 @@ class ModelConfig(NamedTuple):
 
     # Predictive Coding
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
-    pc_alpha:     float = 0.1     # lr de la boucle d'inférence
-    pc_tol:       float = 1e-4    # critère MSE d'arrêt (MSE << L∞, seuil adapté)
+    pc_alpha:     float = 0.3     # lr de la boucle d'inférence (0.3 → taux ~0.917/step)
+    pc_tol:       float = 1e-2    # critère MSE d'arrêt (atteignable en ~80 pas début, ~20 fin)
     pc_max_iter:  int   = 100     # nb max d'itérations — laisser converger réellement
 
     # Predictor (Transformer + MLP)

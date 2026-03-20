@@ -24,7 +24,7 @@ from models.pc_nodes import (
 from training.trainer import create_train_state, make_train_step, _build_optimizer
 
 CONTROL_NS = (100, 1000, 4000)
-N_TRAIN_STEPS = 200          # rapide — juste assez pour un état non-trivial
+N_TRAIN_STEPS = 500          # assez pour que la MSE descende sous pc_tol=1e-2
 N_EVAL_BATCHES = 10          # batches pour mesurer T_conv
 SEED = 42
 
