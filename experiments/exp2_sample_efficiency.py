@@ -79,11 +79,10 @@ def _train_pc_jepa(
         **{k: v for k, v in config._asdict().items() if k != 'seed'},
         seed=seed,
     )
+    n_steps  = _steps_for(n, data_config.batch_size)   # calculé avant optimizer (critique)
     state    = create_train_state(local_config)
-    optimizer = _build_optimizer(local_config)
+    optimizer = _build_optimizer(local_config, n_steps=n_steps)
     step_fn  = make_train_step(local_config, optimizer)
-
-    n_steps = _steps_for(n, data_config.batch_size)
     train_iter = loader_fn()
 
     for step in range(n_steps):
@@ -116,14 +115,22 @@ def _train_transformer(
         **{k: v for k, v in config._asdict().items() if k != 'seed'},
         seed=seed,
     )
-    state = create_transformer_train_state(local_config)
+    n_steps = _steps_for(n, data_config.batch_size)   # calculé avant optimizer (critique)
+    state   = create_transformer_train_state(local_config)
+    # Schedule dynamique pour le Transformer (même budget proportionnel que PC-JEPA)
+    warmup_t = min(local_config.warmup_steps, n_steps // 10)
+    schedule_t = optax.warmup_cosine_decay_schedule(
+        init_value   = 0.0,
+        peak_value   = local_config.learning_rate,
+        warmup_steps = warmup_t,
+        decay_steps  = n_steps,
+        end_value    = local_config.learning_rate * 0.01,
+    )
     optimizer = optax.chain(
         optax.clip_by_global_norm(1.0),
-        optax.adam(learning_rate=local_config.learning_rate),
+        optax.adam(learning_rate=schedule_t),
     )
     step_fn = make_transformer_train_step(local_config, optimizer)
-
-    n_steps = _steps_for(n, data_config.batch_size)
     train_iter = loader_fn()
 
     for step in range(n_steps):
@@ -201,6 +208,14 @@ def run_exp2(config: ModelConfig, data_config: DataConfig = None) -> dict:
 
     # Test set partagé entre tous les modèles (même données, même seed)
     _, _, test_fn = get_dataloaders(data_config)
+
+    # Vérification budget warmup par n (assure warmup ≤ 10% du budget)
+    print("\n[Check] Budget warmup par n :")
+    for n_check in [100, 250, 500, 1000, 10000]:
+        steps_check  = _steps_for(n_check, data_config.batch_size)
+        warmup_check = min(config.warmup_steps, steps_check // 10)
+        pct = warmup_check / steps_check * 100
+        print(f"  n={n_check:6d} → {steps_check:5d} steps, warmup={warmup_check:3d} ({pct:.0f}%)")
 
     print("=" * 60)
     print("[Exp2] Sample Efficiency — PC-JEPA vs Transformer")

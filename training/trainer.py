@@ -49,14 +49,26 @@ class TrainState(NamedTuple):
     key:               jax.random.PRNGKey
 
 
-def _build_optimizer(config: ModelConfig) -> optax.GradientTransformation:
-    """Construit l'optimizer avec warmup + cosine decay."""
+def _build_optimizer(
+    config: ModelConfig,
+    n_steps: int = None,
+) -> optax.GradientTransformation:
+    """
+    Construit l'optimizer avec warmup proportionnel au budget réel.
+
+    n_steps : budget total du run. Si None, utilise config.n_epochs * 312
+              (valeur correcte pour n=10000, batch_size=32).
+              Pour exp2, passer le vrai n_steps calculé par _steps_for().
+    """
+    total_steps  = n_steps if n_steps is not None else config.n_epochs * 312
+    warmup_steps = min(config.warmup_steps, total_steps // 10)  # max 10% du budget
+
     schedule = optax.warmup_cosine_decay_schedule(
-        init_value  = 0.0,
-        peak_value  = config.learning_rate,
-        warmup_steps= config.warmup_steps,
-        decay_steps = config.n_epochs * 312,   # ~steps per epoch pour n=10000, bs=32
-        end_value   = config.learning_rate * 0.01,
+        init_value   = 0.0,
+        peak_value   = config.learning_rate,
+        warmup_steps = warmup_steps,
+        decay_steps  = total_steps,
+        end_value    = config.learning_rate * 0.01,
     )
     return optax.chain(
         optax.clip_by_global_norm(1.0),
@@ -165,13 +177,28 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             z_target_k = z_target[:, :K, :]                # (B, K, d_z) — stop_grad via z_target
 
             # Étape 5 — Pertes combinées
+            # Curriculum prec_alpha : 0.0 → 1.0 sur les 30 premiers % du budget
+            # state.step est un jnp.int32 traceable — opérations JAX valides en JIT
+            total_steps_budget = config.n_epochs * 312      # budget de référence (n=10000)
+            alpha_current = jnp.clip(
+                state.step / (total_steps_budget * 0.30),
+                0.0, 1.0,
+            )
+
             # Boucle 2 : precision divisive sur les erreurs de prédiction JEPA
-            # z_target_k est déjà stop_gradient (R3 — appliqué ligne 131)
+            # z_target_k est déjà stop_gradient (R3 — appliqué étape 2)
             errors_jepa = (z_pred - z_target_k).reshape(-1, z_pred.shape[-1])  # (B*K, d_z)
-            l_jepa = pc_loss_hybrid(errors_jepa, prec_p_, alpha=config.prec_alpha)
-            l_var  = loss_variance(
+            l_jepa = pc_loss_hybrid(errors_jepa, prec_p_, alpha=alpha_current)
+
+            # l_var sur z_pred ET z_context : protection contre collapse de l'encodeur
+            l_var_pred = loss_variance(
                 z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var
             )
+            l_var_ctx = loss_variance(
+                z_context.reshape(-1, z_context.shape[-1]), config.gamma_var
+            )
+            l_var = l_var_pred + l_var_ctx
+
             total = l_jepa + config.lambda_pc * l_pc + config.lambda_var * l_var
 
             aux = {
@@ -181,6 +208,7 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
                 'loss_var':   l_var,
                 'T_conv':     T_conv,
                 'pc_error':   final_err,
+                'prec_alpha': alpha_current,   # monitoring du curriculum
             }
             return total, aux
 
@@ -313,7 +341,8 @@ def train(
                 f"jepa={float(metrics['loss_jepa']):.4f}  "
                 f"pc={float(metrics['loss_pc']):.4f}  "
                 f"var={float(metrics['loss_var']):.4f}  "
-                f"T_conv={int(metrics['T_conv']):3d}"
+                f"T_conv={int(metrics['T_conv']):3d}  "
+                f"α={float(metrics['prec_alpha']):.3f}"
             )
 
         if step % eval_every == 0 and step > 0:

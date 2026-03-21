@@ -53,7 +53,8 @@ def run_exp1(config: ModelConfig, data_config: DataConfig = None) -> dict:
                 f"  step={step:5d}/{n_steps}  "
                 f"loss={float(metrics['loss_total']):.4f}  "
                 f"jepa={float(metrics['loss_jepa']):.4f}  "
-                f"T_conv={int(metrics['T_conv'])}"
+                f"T_conv={int(metrics['T_conv'])}  "
+                f"α={float(metrics.get('prec_alpha', 0.0)):.3f}"
             )
 
     print("\n[Exp1] Évaluation sur le test set...")
