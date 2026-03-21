@@ -35,6 +35,7 @@ class ModelConfig(NamedTuple):
     lambda_pc:  float = 0.1       # poids L_PC
     lambda_var: float = 0.01      # poids L_var
     gamma_var:  float = 1.0       # variance cible (anti-collapse)
+    prec_alpha: float = 1.0       # curriculum divisif : 0=standard, 1=divisif pur
 
     # Transformer (predictor PC-JEPA et baseline partagent ces hyperparamètres)
     trans_n_layers: int = 1       # 1 couche → ~935K params (parité ≤25%)
