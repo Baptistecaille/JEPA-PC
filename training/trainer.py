@@ -27,9 +27,11 @@ from models.pc_nodes import (
     PCWeights, init_pc_weights, init_pc_from_encoding, run_inference_loop,
     pc_weights_to_flat_dict, flat_dict_to_pc_weights,
 )
-from training.losses import loss_jepa, loss_variance
+from training.losses import loss_variance
 from models.pc_nodes import free_energy
 from data.moving_mnist import Batch, DataConfig
+from precision.module import PrecisionParams, init_precision_params, enforce_pv_constraints
+from precision.losses import pc_loss_hybrid
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +43,7 @@ class TrainState(NamedTuple):
     encoder_weights:   dict
     predictor_weights: dict
     pc_weights_flat:   dict          # dict plat (compatible optax)
+    prec_params:       PrecisionParams  # module de précision divisive
     optimizer_state:   optax.OptState
     step:              int
     key:               jax.random.PRNGKey
@@ -64,15 +67,16 @@ def _build_optimizer(config: ModelConfig) -> optax.GradientTransformation:
 def create_train_state(config: ModelConfig) -> TrainState:
     """Initialise tous les poids et l'optimizer. (R5 — seed unique)"""
     key = jax.random.PRNGKey(config.seed)
-    key, sk_enc, sk_pred, sk_pc = jax.random.split(key, 4)
+    key, sk_enc, sk_pred, sk_pc, sk_prec = jax.random.split(key, 5)
 
-    enc_w  = init_encoder(sk_enc,  config)
-    pred_w = init_predictor(sk_pred, config)
-    pc_w   = init_pc_weights(sk_pc, config)
+    enc_w   = init_encoder(sk_enc, config)
+    pred_w  = init_predictor(sk_pred, config)
+    pc_w    = init_pc_weights(sk_pc, config)
     pc_flat = pc_weights_to_flat_dict(pc_w)
+    prec_p  = init_precision_params(config.d_z, sk_prec)
 
-    # Les poids à optimiser : encodeur + predictor + pc (hiérarchie)
-    all_weights = {'enc': enc_w, 'pred': pred_w, 'pc': pc_flat}
+    # Les poids à optimiser : encodeur + predictor + pc + précision divisive
+    all_weights = {'enc': enc_w, 'pred': pred_w, 'pc': pc_flat, 'prec': prec_p}
 
     optimizer = _build_optimizer(config)
     opt_state = optimizer.init(all_weights)
@@ -81,6 +85,7 @@ def create_train_state(config: ModelConfig) -> TrainState:
         encoder_weights   = enc_w,
         predictor_weights = pred_w,
         pc_weights_flat   = pc_flat,
+        prec_params       = prec_p,
         optimizer_state   = opt_state,
         step              = 0,
         key               = key,
@@ -121,6 +126,7 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             enc_w_   = all_weights['enc']
             pred_w_  = all_weights['pred']
             pc_flat_ = all_weights['pc']
+            prec_p_  = all_weights['prec']
             pc_w_    = flat_dict_to_pc_weights(pc_flat_, config)
 
             # Étape 1 — Encodage contexte
@@ -152,14 +158,17 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             )
 
             # Étape 4 — Prédiction dans l'espace latent
-            z_pred = apply_predictor(pred_w_, z_context)   # (B, K, d_z)
+            z_pred = apply_predictor(pred_w_, z_context, config)   # (B, K, d_z)
 
             # Aligner les horizons
             K = config.pred_K
-            z_target_k = z_target[:, :K, :]                # (B, K, d_z)
+            z_target_k = z_target[:, :K, :]                # (B, K, d_z) — stop_grad via z_target
 
             # Étape 5 — Pertes combinées
-            l_jepa = loss_jepa(z_pred, z_target_k)
+            # Boucle 2 : precision divisive sur les erreurs de prédiction JEPA
+            # z_target_k est déjà stop_gradient (R3 — appliqué ligne 131)
+            errors_jepa = (z_pred - z_target_k).reshape(-1, z_pred.shape[-1])  # (B*K, d_z)
+            l_jepa = pc_loss_hybrid(errors_jepa, prec_p_, alpha=config.prec_alpha)
             l_var  = loss_variance(
                 z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var
             )
@@ -179,6 +188,7 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             'enc':  enc_w,
             'pred': pred_w,
             'pc':   state.pc_weights_flat,
+            'prec': state.prec_params,
         }
 
         # Étape 5+6 — Calcul gradients + mise à jour (Boucle 2)
@@ -189,10 +199,14 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
         )
         new_weights = optax.apply_updates(all_weights, updates)
 
+        # Contraintes biologiques PV après update gradient (positivité + diag=0 + norm)
+        new_prec_p = enforce_pv_constraints(new_weights['prec'])
+
         new_state = TrainState(
             encoder_weights   = new_weights['enc'],
             predictor_weights = new_weights['pred'],
             pc_weights_flat   = new_weights['pc'],
+            prec_params       = new_prec_p,
             optimizer_state   = new_opt_state,
             step              = state.step + 1,
             key               = state.key,
@@ -235,7 +249,7 @@ def evaluate(
             init_pc_state, pc_w, z_context[:, -1, :], config
         )
 
-        z_pred = apply_predictor(pred_w, z_context)
+        z_pred = apply_predictor(pred_w, z_context, config)
         z_target_k = z_target[:, :config.pred_K, :]
 
         metrics = compute_all_metrics(z_pred, z_target_k, pc_converged, T_conv)

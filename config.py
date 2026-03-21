@@ -22,12 +22,11 @@ class ModelConfig(NamedTuple):
 
     # Predictive Coding
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
-    pc_alpha:     float = 0.1     # lr de la boucle d'inférence
-    pc_tol:       float = 1e-4    # critère MSE d'arrêt (MSE << L∞, seuil adapté)
+    pc_alpha:     float = 0.1     # lr de la boucle d'inférence (stable : α < 2/||H||_2 ≈ 0.22)
+    pc_tol:       float = 0.15   # critère MSE d'arrêt : atteignable en ~82 pas (modèle random)
     pc_max_iter:  int   = 100     # nb max d'itérations — laisser converger réellement
 
-    # Predictor (GRU + MLP)
-    pred_hidden:  int   = 256     # dim hidden du GRU
+    # Predictor (Transformer + MLP)
     pred_k_embed: int   = 16      # dim embedding de l'horizon k
     pred_mlp_dim: int   = 512     # dim couches cachées MLP head
     pred_K:       int   = 5       # horizon max de prédiction
@@ -36,11 +35,12 @@ class ModelConfig(NamedTuple):
     lambda_pc:  float = 0.1       # poids L_PC
     lambda_var: float = 0.01      # poids L_var
     gamma_var:  float = 1.0       # variance cible (anti-collapse)
+    prec_alpha: float = 1.0       # curriculum divisif : 0=standard, 1=divisif pur
 
-    # Transformer baseline (parité paramètres avec PC-JEPA predictor ~930K)
-    trans_n_layers: int = 1       # 1 couche → ~930K params (parité avec GRU+MLP)
+    # Transformer (predictor PC-JEPA et baseline partagent ces hyperparamètres)
+    trans_n_layers: int = 1       # 1 couche → ~935K params (parité ≤25%)
     trans_n_heads:  int = 4       # têtes d'attention (d_z doit être divisible)
-    trans_ffn_dim:  int = 256     # dim FFN interne (réduit pour parité)
+    trans_ffn_dim:  int = 256     # dim FFN interne
 
     # Optimisation (Boucle 2)
     learning_rate: float = 3e-4

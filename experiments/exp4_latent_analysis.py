@@ -51,7 +51,7 @@ def collect_latent_representations(
         init_state = init_pc_from_encoding(z_context[:, -1, :], pc_w, config)
         pc_conv, T_conv, _ = run_inference_loop(init_state, pc_w, z_context[:, -1, :], config)
 
-        z_pred = apply_predictor(pred_w, z_context)
+        z_pred = apply_predictor(pred_w, z_context, config)
 
         all_z_context.append(np.array(z_context[:, -1, :]))   # dernière frame
         all_z_pred.append(np.array(z_pred[:, 0, :]))          # horizon 1
