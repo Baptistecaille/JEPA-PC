@@ -309,7 +309,7 @@ def init_pc_hierarchy(
     reprs_list = [obs_embedding]   # (B, d_z)
     for _ in range(L - 1):
         key, sk = jax.random.split(key)
-        noise = jax.random.normal(sk, (B, config.d_z)) * 0.1
+        noise = jax.random.normal(sk, (B, config.d_z)) * 1.0
         reprs_list.append(noise)
 
     representations = jnp.stack(reprs_list, axis=0)   # (L, B, d_z)
