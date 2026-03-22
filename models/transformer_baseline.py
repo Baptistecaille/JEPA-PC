@@ -262,7 +262,20 @@ class TransformerTrainState(NamedTuple):
     key:                 jax.random.PRNGKey
 
 
-def create_transformer_train_state(config: ModelConfig) -> TransformerTrainState:
+def create_transformer_train_state(
+    config: ModelConfig,
+    optimizer: optax.GradientTransformation,
+) -> TransformerTrainState:
+    """
+    Initialise les poids du Transformer et l'optimizer externe.
+
+    optimizer : doit être construit AVANT l'appel, avec le bon n_steps.
+                Utiliser le même pattern que PC-JEPA (_build_optimizer).
+    """
+    assert optimizer is not None, (
+        "create_transformer_train_state requiert un optimizer externe. "
+        "Construire l'optimizer avec le bon n_steps avant l'appel."
+    )
     key = jax.random.PRNGKey(config.seed)
     key, sk_enc, sk_trans = jax.random.split(key, 3)
 
@@ -270,10 +283,6 @@ def create_transformer_train_state(config: ModelConfig) -> TransformerTrainState
     trans_w = init_transformer_predictor(sk_trans, config)
 
     all_weights = {'enc': enc_w, 'trans': trans_w}
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(1.0),
-        optax.adam(learning_rate=config.learning_rate),
-    )
     opt_state = optimizer.init(all_weights)
 
     return TransformerTrainState(

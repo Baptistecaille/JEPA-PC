@@ -300,15 +300,17 @@ def init_pc_hierarchy(
     """
     Initialise PCHierarchyState.
     Niveau 0 ancré sur obs_embedding.
-    Niveaux 1..L-1 initialisés à zéro.
+    Niveaux 1..L-1 initialisés avec du bruit gaussien léger (σ=0.1)
+    pour garantir compute_max_error(init_state) > pc_tol au démarrage.
     """
     L = config.pc_n_layers
     B = batch_size
 
-    # Représentations : niveau 0 = obs, niveaux supérieurs = 0
     reprs_list = [obs_embedding]   # (B, d_z)
     for _ in range(L - 1):
-        reprs_list.append(jnp.zeros((B, config.d_z)))
+        key, sk = jax.random.split(key)
+        noise = jax.random.normal(sk, (B, config.d_z)) * 0.1
+        reprs_list.append(noise)
 
     representations = jnp.stack(reprs_list, axis=0)   # (L, B, d_z)
     precisions      = jnp.ones((L, B, config.d_z))    # précisions uniformes

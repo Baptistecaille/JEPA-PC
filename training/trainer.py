@@ -190,14 +190,10 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             errors_jepa = (z_pred - z_target_k).reshape(-1, z_pred.shape[-1])  # (B*K, d_z)
             l_jepa = pc_loss_hybrid(errors_jepa, prec_p_, alpha=alpha_current)
 
-            # l_var sur z_pred ET z_context : protection contre collapse de l'encodeur
-            l_var_pred = loss_variance(
+            # l_var sur z_pred uniquement — l_var_ctx supprimé (conflit gradient exp3)
+            l_var = loss_variance(
                 z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var
             )
-            l_var_ctx = loss_variance(
-                z_context.reshape(-1, z_context.shape[-1]), config.gamma_var
-            )
-            l_var = l_var_pred + l_var_ctx
 
             total = l_jepa + config.lambda_pc * l_pc + config.lambda_var * l_var
 
