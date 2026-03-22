@@ -281,7 +281,17 @@ def evaluate(
             init_pc_state, pc_w, z_context[:, -1, :], config
         )
 
-        z_pred = apply_predictor(pred_w, z_context, config)
+        if config.use_pc_errors_in_predictor:
+            pc_errors_l0  = pc_converged.errors[0]
+            err_broadcast = jnp.broadcast_to(
+                pc_errors_l0[:, jnp.newaxis, :],
+                (z_context.shape[0], z_context.shape[1], pc_errors_l0.shape[-1])
+            )
+            z_pred_input = jnp.concatenate([z_context, err_broadcast], axis=-1)
+        else:
+            z_pred_input = z_context
+
+        z_pred = apply_predictor(pred_w, z_pred_input, config)
         z_target_k = z_target[:, :config.pred_K, :]
 
         metrics = compute_all_metrics(z_pred, z_target_k, pc_converged, T_conv)

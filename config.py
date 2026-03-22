@@ -24,7 +24,7 @@ class ModelConfig(NamedTuple):
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
     pc_alpha:     float = 0.1     # lr de la boucle d'inférence (stable : α < 2/||H||_2 ≈ 0.22)
     pc_tol:       float = 0.05   # critère MSE d'arrêt : force la boucle à itérer réellement
-    pc_max_iter:  int   = 1000    # nb max d'itérations — laisser converger réellement
+    pc_max_iter:  int   = 200    # nb max d'itérations — laisser converger réellement
 
     # Predictor (Transformer + MLP)
     pred_k_embed: int   = 16      # dim embedding de l'horizon k
@@ -32,7 +32,7 @@ class ModelConfig(NamedTuple):
     pred_K:       int   = 5       # horizon max de prédiction
 
     # Pertes
-    lambda_pc:  float = 0.1       # poids L_PC
+    lambda_pc:  float = 0.01       # poids L_PC
     lambda_var: float = 0.01      # poids L_var
     gamma_var:  float = 1.0       # variance cible (anti-collapse)
     prec_alpha: float = 0.0       # curriculum divisif : 0=standard, 1=divisif pur
