@@ -24,7 +24,7 @@ import optax
 # Configuration de l'expérience (R7 — constantes nommées)
 # ---------------------------------------------------------------------------
 
-EFFICIENCY_NS  = (100, 250, 500, 1000, 2000, 4000, 7000, 10000)
+EFFICIENCY_NS  = (100, 500, 1000, 4000, 10000)
 SEEDS          = (42, 137, 2024)
 N_EPOCHS_SHORT = 50    # budget réduit pour les petits n
 N_EPOCHS_FULL  = 100   # budget complet pour n ≥ 2000
