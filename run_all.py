@@ -74,6 +74,55 @@ def main():
         check_parameter_parity(pred_w, trans_w)
         print()
 
+        # [Phase 1] Sanity checks predictor enrichi
+        import jax.numpy as jnp
+        from models.predictor import init_predictor, apply_predictor
+        print("[Sanity] Phase 1 — predictor avec erreurs PC")
+
+        cfg_std = ModelConfig(use_pc_errors_in_predictor=False)
+        cfg_v2  = ModelConfig(use_pc_errors_in_predictor=True)
+
+        key_s = jax.random.PRNGKey(99)
+
+        w_std = init_predictor(key_s, cfg_std)
+        w_v2  = init_predictor(key_s, cfg_v2)
+
+        z_std = jax.random.normal(key_s, (2, 10, cfg_std.d_z))
+        z_v2  = jax.random.normal(key_s, (2, 10, cfg_v2.d_z * 2))
+
+        out_std = apply_predictor(w_std, z_std, cfg_std)
+        out_v2  = apply_predictor(w_v2,  z_v2,  cfg_v2)
+
+        assert out_std.shape == (2, cfg_std.pred_K, cfg_std.d_z), \
+            f"[Phase1-S1] shape standard: {out_std.shape}"
+        assert out_v2.shape  == (2, cfg_v2.pred_K,  cfg_v2.d_z), \
+            f"[Phase1-S1] shape v2: {out_v2.shape}"
+        print("  [Phase1-S1] ✓ shapes correctes")
+
+        assert not jnp.any(jnp.isnan(out_std)), "[Phase1-S2] NaN mode standard"
+        assert not jnp.any(jnp.isnan(out_v2)),  "[Phase1-S2] NaN mode v2"
+        print("  [Phase1-S2] ✓ pas de NaN")
+
+        jit_pred = jax.jit(apply_predictor, static_argnames=('config',))
+        _ = jit_pred(w_v2, z_v2, cfg_v2)
+        print("  [Phase1-S3] ✓ JIT-compatible")
+
+        loss_fn_test = lambda w: jnp.mean(apply_predictor(w, z_v2, cfg_v2) ** 2)
+        grads = jax.grad(loss_fn_test)(w_v2)
+        assert all(jnp.all(jnp.isfinite(g)) for g in jax.tree_util.tree_leaves(grads)), \
+            "[Phase1-S4] gradient non-fini"
+        print("  [Phase1-S4] ✓ gradients finis")
+
+        n_std = sum(v.size for v in jax.tree_util.tree_leaves(w_std))
+        n_v2  = sum(v.size for v in jax.tree_util.tree_leaves(w_v2))
+        delta = n_v2 - n_std
+        expected_delta = cfg_v2.d_z * cfg_v2.d_z  # carré supplémentaire dans input_proj_w
+        assert delta == expected_delta, \
+            f"[Phase1-S5] delta params: {delta} ≠ {expected_delta}"
+        print(f"  [Phase1-S5] ✓ delta params = {delta} (+{delta/n_std*100:.1f}%)")
+
+        print("[Sanity] Phase 1 — OK\n")
+
         print("\n" + "=" * 60)
         print("✅ Tous les sanity checks passés. Prêt pour les expériences.")
         print("=" * 60 + "\n")

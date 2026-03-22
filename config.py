@@ -49,3 +49,6 @@ class ModelConfig(NamedTuple):
 
     # Reproductibilité (R5)
     seed: int = 42
+
+    # Phase 1 — PC-JEPA v2
+    use_pc_errors_in_predictor: bool = False

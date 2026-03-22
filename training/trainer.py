@@ -169,8 +169,22 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
                 jax.lax.stop_gradient(obs),        # obs figé
             )
 
-            # Étape 4 — Prédiction dans l'espace latent
-            z_pred = apply_predictor(pred_w_, z_context, config)   # (B, K, d_z)
+            # Étape 4 — Construction de l'input predictor
+            # Mode standard : z_context seul (B, T_in, d_z)
+            # Mode v2      : z_context enrichi avec erreurs PC (B, T_in, 2*d_z)
+            if config.use_pc_errors_in_predictor:
+                pc_errors_l0 = pc_converged.errors[0]                       # (B, d_z)
+                err_broadcast = jnp.broadcast_to(
+                    pc_errors_l0[:, jnp.newaxis, :],
+                    (z_context.shape[0], z_context.shape[1], pc_errors_l0.shape[-1])
+                )                                                            # (B, T_in, d_z)
+                z_pred_input = jnp.concatenate([z_context, err_broadcast], axis=-1)
+                # shape : (B, T_in, 2*d_z)
+            else:
+                z_pred_input = z_context
+                # shape : (B, T_in, d_z)
+
+            z_pred = apply_predictor(pred_w_, z_pred_input, config)         # (B, K, d_z)
 
             # Aligner les horizons
             K = config.pred_K

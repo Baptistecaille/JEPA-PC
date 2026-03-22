@@ -144,6 +144,13 @@ def init_predictor(key: jax.random.PRNGKey, config: ModelConfig) -> dict:
     ke       = config.pred_k_embed
     mlp_d    = config.pred_mlp_dim
 
+    # Projection d'entrée : d_input → d_z (toujours présente)
+    d_input = d_model * 2 if config.use_pc_errors_in_predictor else d_model
+    key, sk = jax.random.split(key)
+    std_proj = jnp.sqrt(2.0 / d_input)
+    weights['input_proj_w'] = jax.random.normal(sk, (d_input, d_model)) * std_proj
+    weights['input_proj_b'] = jnp.zeros((d_model,))
+
     std_attn = jnp.sqrt(2.0 / d_model)
 
     for l in range(n_layers):
@@ -213,13 +220,19 @@ def apply_predictor(
     puis MLP par horizon avec embedding.
     JIT-compatible : pas de boucle Python sur K.
     """
-    B, T, d_model = z_context.shape
+    B, T, d_input = z_context.shape
+    d_model  = config.d_z
     n_layers = config.trans_n_layers
     n_heads  = config.trans_n_heads
 
+    # Projection d'entrée : (B, T, d_input) → (B, T, d_z)
+    x_flat = z_context.reshape(B * T, d_input)
+    x_proj = x_flat @ weights['input_proj_w'] + weights['input_proj_b']  # (B*T, d_z)
+    x = x_proj.reshape(B, T, d_model)                                     # (B, T, d_z)
+
     # Positional encoding
     pos = weights['pos_embed'][:T]             # (T, d_model)
-    x = z_context + pos[jnp.newaxis]           # (B, T, d_model)
+    x = x + pos[jnp.newaxis]                   # (B, T, d_model)
 
     # Couches Transformer
     for l in range(n_layers):
