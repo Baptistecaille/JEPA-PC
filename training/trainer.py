@@ -177,13 +177,7 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             z_target_k = z_target[:, :K, :]                # (B, K, d_z) — stop_grad via z_target
 
             # Étape 5 — Pertes combinées
-            # Curriculum prec_alpha : 0.0 → 1.0 sur les 30 premiers % du budget
-            # state.step est un jnp.int32 traceable — opérations JAX valides en JIT
-            total_steps_budget = config.n_epochs * 312      # budget de référence (n=10000)
-            alpha_current = jnp.clip(
-                state.step / (total_steps_budget * 0.30),
-                0.0, 1.0,
-            )
+            alpha_current = jnp.array(config.prec_alpha, dtype=jnp.float32)
 
             # Boucle 2 : precision divisive sur les erreurs de prédiction JEPA
             # z_target_k est déjà stop_gradient (R3 — appliqué étape 2)

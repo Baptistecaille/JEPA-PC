@@ -25,7 +25,7 @@ import optax
 # ---------------------------------------------------------------------------
 
 EFFICIENCY_NS  = (100, 500, 1000, 4000, 10000)
-SEEDS          = (42, 137, 2024)
+SEEDS          = (42, 137)
 N_EPOCHS_SHORT = 50    # budget réduit pour les petits n
 N_EPOCHS_FULL  = 100   # budget complet pour n ≥ 2000
 
@@ -226,7 +226,7 @@ def run_exp2(config: ModelConfig, data_config: DataConfig = None) -> dict:
     total = len(EFFICIENCY_NS) * len(SEEDS) * 2
     done  = 0
 
-    for model_type in ['pc_jepa', 'transformer']:
+    for model_type in ['transformer', 'pc_jepa']:
         for n in EFFICIENCY_NS:
             for seed in SEEDS:
                 done += 1

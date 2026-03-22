@@ -23,8 +23,8 @@ class ModelConfig(NamedTuple):
     # Predictive Coding
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
     pc_alpha:     float = 0.1     # lr de la boucle d'inférence (stable : α < 2/||H||_2 ≈ 0.22)
-    pc_tol:       float = 0.01   # critère MSE d'arrêt : force la boucle à itérer réellement
-    pc_max_iter:  int   = 100     # nb max d'itérations — laisser converger réellement
+    pc_tol:       float = 0.05   # critère MSE d'arrêt : force la boucle à itérer réellement
+    pc_max_iter:  int   = 1000    # nb max d'itérations — laisser converger réellement
 
     # Predictor (Transformer + MLP)
     pred_k_embed: int   = 16      # dim embedding de l'horizon k
