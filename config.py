@@ -23,7 +23,7 @@ class ModelConfig(NamedTuple):
     # Predictive Coding
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
     pc_alpha:     float = 0.1     # lr de la boucle d'inférence (stable : α < 2/||H||_2 ≈ 0.22)
-    pc_tol:       float = 0.05   # critère MSE d'arrêt : force la boucle à itérer réellement
+    pc_tol:       float = 0.1   # critère MSE d'arrêt : force la boucle à itérer réellement
     pc_max_iter:  int   = 200    # nb max d'itérations — laisser converger réellement
 
     # Predictor (Transformer + MLP)
@@ -43,7 +43,7 @@ class ModelConfig(NamedTuple):
     trans_ffn_dim:  int = 256     # dim FFN interne
 
     # Optimisation (Boucle 2)
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-3
     n_epochs:      int   = 100
     warmup_steps:  int   = 500
 
