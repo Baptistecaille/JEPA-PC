@@ -93,9 +93,33 @@ def _train_pc_jepa(
             batch = next(train_iter)
 
         batch_jnp = Batch(jnp.array(batch.context), jnp.array(batch.target))
-        state, _ = step_fn(state, batch_jnp)
+        state, metrics = step_fn(state, batch_jnp)
 
-    return evaluate(state, test_fn, local_config, n_batches=50)
+        metrics_vec = jnp.array([
+            metrics['loss_total'],
+            metrics['loss_jepa'],
+            metrics['loss_pc'],
+            metrics['loss_var'],
+            metrics['pc_error'],
+        ], dtype=jnp.float32)
+        if not bool(jnp.all(jnp.isfinite(metrics_vec))):
+            raise FloatingPointError(
+                "Non-finite training metrics "
+                f"(step={step}, n={n}, seed={seed}): "
+                f"loss_total={float(metrics['loss_total'])}, "
+                f"loss_jepa={float(metrics['loss_jepa'])}, "
+                f"loss_pc={float(metrics['loss_pc'])}, "
+                f"loss_var={float(metrics['loss_var'])}, "
+                f"pc_error={float(metrics['pc_error'])}"
+            )
+
+    result = evaluate(state, test_fn, local_config, n_batches=50)
+    nmse_val = float(result.get('nmse', float('nan')))
+    if not bool(jnp.isfinite(jnp.array(nmse_val, dtype=jnp.float32))):
+        raise FloatingPointError(
+            f"NMSE non-finie après évaluation (n={n}, seed={seed}): {nmse_val}"
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------

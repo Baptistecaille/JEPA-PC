@@ -208,7 +208,8 @@ def run_inference_loop(
     """
     def cond_fn(carry):
         state, t, err = carry
-        not_converged = err > config.pc_tol
+        # Arrêt sûr: si err devient NaN/Inf, on stoppe la boucle immédiatement.
+        not_converged = jnp.logical_and(jnp.isfinite(err), err > config.pc_tol)
         not_maxed     = t < config.pc_max_iter
         return jnp.logical_and(not_converged, not_maxed)
 
@@ -220,7 +221,7 @@ def run_inference_loop(
         new_err = compute_max_error(new_state)
         return (new_state, t + 1, new_err)
 
-    init_carry = (init_state, jnp.int32(0), jnp.array(jnp.inf, dtype=jnp.float32))
+    init_carry = (init_state, jnp.int32(0), compute_max_error(init_state))
     final_state, T_conv, final_err = jax.lax.while_loop(cond_fn, body_fn, init_carry)
     return final_state, T_conv, final_err
 

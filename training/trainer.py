@@ -268,6 +268,10 @@ def evaluate(
     pred_w = state.predictor_weights
     pc_w   = flat_dict_to_pc_weights(state.pc_weights_flat, config)
 
+    def _all_finite(metrics_dict: dict) -> bool:
+        vals = [jnp.array(v, dtype=jnp.float32) for v in metrics_dict.values()]
+        return bool(jnp.all(jnp.isfinite(jnp.stack(vals))))
+
     all_metrics = []
     for i, batch in enumerate(data_iter()):
         if i >= n_batches:
@@ -294,10 +298,20 @@ def evaluate(
         z_pred = apply_predictor(pred_w, z_pred_input, config)
         z_target_k = z_target[:, :config.pred_K, :]
 
+        if not bool(jnp.all(jnp.isfinite(z_pred))):
+            raise FloatingPointError(f"Évaluation: z_pred non-fini au batch {i}")
+        if not bool(jnp.all(jnp.isfinite(z_target_k))):
+            raise FloatingPointError(f"Évaluation: z_target_k non-fini au batch {i}")
+
         metrics = compute_all_metrics(z_pred, z_target_k, pc_converged, T_conv)
+        if not _all_finite(metrics):
+            raise FloatingPointError(f"Évaluation: métriques non-finies au batch {i}: {metrics}")
         all_metrics.append(metrics)
 
     # Moyenne sur les batches
+    if len(all_metrics) == 0:
+        raise ValueError("Évaluation: aucun batch disponible pour calculer les métriques")
+
     averaged = {}
     for key in all_metrics[0]:
         averaged[key] = float(jnp.mean(jnp.stack([m[key] for m in all_metrics])))
