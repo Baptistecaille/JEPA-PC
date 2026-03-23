@@ -61,12 +61,13 @@ def _load_mnist_digits(rng: np.random.Generator) -> np.ndarray:
         return _MNIST_DIGITS_CACHE
 
     try:
-        raise ImportError("skip tf")
+        import tensorflow as tf
         (x_train, _), (x_test, _) = tf.keras.datasets.mnist.load_data()
         digits = np.concatenate([x_train, x_test], axis=0)  # (70000, 28, 28)
     except Exception:
         try:
-            raise ImportError("skip pt")
+            import torchvision.datasets as datasets
+            import torchvision.transforms as transforms
             import tempfile, os
             with tempfile.TemporaryDirectory() as tmp:
                 ds = tvd.MNIST(root=tmp, train=True, download=True)
