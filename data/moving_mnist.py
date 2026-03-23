@@ -49,7 +49,7 @@ class Batch(NamedTuple):
 _MNIST_DIGITS_CACHE: np.ndarray | None = None
 
 
-def _load_mnist_digits(rng: np.random.Generator) -> np.ndarray:
+def _load_mnist_digits() -> np.ndarray:
     """
     Retourne les chiffres MNIST.
     Ordre de priorité :
@@ -59,6 +59,9 @@ def _load_mnist_digits(rng: np.random.Generator) -> np.ndarray:
       4. torchvision MNIST
       5. Placeholders synthétiques (CI / pas d'internet)
     Shape : (N, 28, 28) uint8
+
+    N'avance JAMAIS le rng de l'appelant : la graine des placeholders est fixe (0),
+    ce qui garantit la reproductibilité de D4 quelle que soit la fréquence d'appel.
     """
     global _MNIST_DIGITS_CACHE
     if _MNIST_DIGITS_CACHE is not None:
@@ -91,11 +94,12 @@ def _load_mnist_digits(rng: np.random.Generator) -> np.ndarray:
                 ds = tvd.MNIST(root=tmp, train=True, download=True)
                 digits = ds.data.numpy()   # (60000, 28, 28)
         except Exception:
-            # Fallback : carrés synthétiques (tests unitaires / CI sans internet)
+            # Fallback : carrés synthétiques (CI / sans internet)
+            # Graine fixe (0) : indépendant du rng de l'appelant → reproductible
             print("[WARNING] MNIST non disponible — utilisation de placeholders synthétiques.")
-            # RNG fixe et indépendant pour ne pas perturber l'état du RNG principal
-            _placeholder_rng = np.random.default_rng(0)
-            digits = _placeholder_rng.integers(0, 255, size=(1000, 28, 28), dtype=np.uint8)
+            digits = np.random.default_rng(0).integers(
+                0, 255, size=(1000, 28, 28), dtype=np.uint8
+            )
 
     _MNIST_DIGITS_CACHE = digits.astype(np.uint8)
     return _MNIST_DIGITS_CACHE
@@ -167,7 +171,7 @@ def get_dataloaders(config: DataConfig) -> tuple:
     Chaque itérateur est une fonction () -> Iterator[Batch].
     """
     rng = np.random.default_rng(config.seed)
-    digits_pool = _load_mnist_digits(rng)
+    digits_pool = _load_mnist_digits()
 
     train_data = _build_dataset(digits_pool, config, config.n_train, rng)
     val_data   = _build_dataset(digits_pool, config, config.n_val,   rng)
@@ -206,7 +210,7 @@ def get_subset_dataloader(
     Seed distinct pour reproductibilité inter-expériences.
     """
     rng = np.random.default_rng(seed)
-    digits_pool = _load_mnist_digits(rng)
+    digits_pool = _load_mnist_digits()
     data = _build_dataset(digits_pool, config, n_samples, rng)
 
     rng_iter = np.random.default_rng(seed)
