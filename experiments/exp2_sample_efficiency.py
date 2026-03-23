@@ -24,8 +24,8 @@ import optax
 # Configuration de l'expérience (R7 — constantes nommées)
 # ---------------------------------------------------------------------------
 
-EFFICIENCY_NS  = (100, 250, 500, 1000, 2000, 4000, 7000, 10000)
-SEEDS          = (42, 137, 2024)
+EFFICIENCY_NS  = (100, 1000, 4000)
+SEEDS          = (42, 137)
 N_EPOCHS_SHORT = 50    # budget réduit pour les petits n
 N_EPOCHS_FULL  = 100   # budget complet pour n ≥ 2000
 
@@ -115,9 +115,7 @@ def _train_transformer(
         **{k: v for k, v in config._asdict().items() if k != 'seed'},
         seed=seed,
     )
-    n_steps = _steps_for(n, data_config.batch_size)   # calculé avant optimizer (critique)
-    state   = create_transformer_train_state(local_config)
-    # Schedule dynamique pour le Transformer (même budget proportionnel que PC-JEPA)
+    n_steps  = _steps_for(n, data_config.batch_size)   # calculé avant optimizer (critique)
     warmup_t = min(local_config.warmup_steps, n_steps // 10)
     schedule_t = optax.warmup_cosine_decay_schedule(
         init_value   = 0.0,
@@ -130,6 +128,7 @@ def _train_transformer(
         optax.clip_by_global_norm(1.0),
         optax.adam(learning_rate=schedule_t),
     )
+    state   = create_transformer_train_state(local_config, optimizer)
     step_fn = make_transformer_train_step(local_config, optimizer)
     train_iter = loader_fn()
 
@@ -227,7 +226,7 @@ def run_exp2(config: ModelConfig, data_config: DataConfig = None) -> dict:
     total = len(EFFICIENCY_NS) * len(SEEDS) * 2
     done  = 0
 
-    for model_type in ['pc_jepa', 'transformer']:
+    for model_type in ['pc_jepa']:
         for n in EFFICIENCY_NS:
             for seed in SEEDS:
                 done += 1

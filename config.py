@@ -23,8 +23,8 @@ class ModelConfig(NamedTuple):
     # Predictive Coding
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
     pc_alpha:     float = 0.1     # lr de la boucle d'inférence (stable : α < 2/||H||_2 ≈ 0.22)
-    pc_tol:       float = 0.15   # critère MSE d'arrêt : atteignable en ~82 pas (modèle random)
-    pc_max_iter:  int   = 100     # nb max d'itérations — laisser converger réellement
+    pc_tol:       float = 0.1   # critère MSE d'arrêt : force la boucle à itérer réellement
+    pc_max_iter:  int   = 200    # nb max d'itérations — laisser converger réellement
 
     # Predictor (Transformer + MLP)
     pred_k_embed: int   = 16      # dim embedding de l'horizon k
@@ -32,7 +32,7 @@ class ModelConfig(NamedTuple):
     pred_K:       int   = 5       # horizon max de prédiction
 
     # Pertes
-    lambda_pc:  float = 0.1       # poids L_PC
+    lambda_pc:  float = 0.01       # poids L_PC
     lambda_var: float = 0.01      # poids L_var
     gamma_var:  float = 1.0       # variance cible (anti-collapse)
     prec_alpha: float = 0.0       # curriculum divisif : 0=standard, 1=divisif pur
@@ -43,9 +43,12 @@ class ModelConfig(NamedTuple):
     trans_ffn_dim:  int = 256     # dim FFN interne
 
     # Optimisation (Boucle 2)
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-3
     n_epochs:      int   = 100
     warmup_steps:  int   = 500
 
     # Reproductibilité (R5)
     seed: int = 42
+
+    # Phase 1 — PC-JEPA v2
+    use_pc_errors_in_predictor: bool = False

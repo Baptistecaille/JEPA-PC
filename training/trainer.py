@@ -169,35 +169,39 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
                 jax.lax.stop_gradient(obs),        # obs figé
             )
 
-            # Étape 4 — Prédiction dans l'espace latent
-            z_pred = apply_predictor(pred_w_, z_context, config)   # (B, K, d_z)
+            # Étape 4 — Construction de l'input predictor
+            # Mode standard : z_context seul (B, T_in, d_z)
+            # Mode v2      : z_context enrichi avec erreurs PC (B, T_in, 2*d_z)
+            if config.use_pc_errors_in_predictor:
+                pc_errors_l0 = pc_converged.errors[0]                       # (B, d_z)
+                err_broadcast = jnp.broadcast_to(
+                    pc_errors_l0[:, jnp.newaxis, :],
+                    (z_context.shape[0], z_context.shape[1], pc_errors_l0.shape[-1])
+                )                                                            # (B, T_in, d_z)
+                z_pred_input = jnp.concatenate([z_context, err_broadcast], axis=-1)
+                # shape : (B, T_in, 2*d_z)
+            else:
+                z_pred_input = z_context
+                # shape : (B, T_in, d_z)
+
+            z_pred = apply_predictor(pred_w_, z_pred_input, config)         # (B, K, d_z)
 
             # Aligner les horizons
             K = config.pred_K
             z_target_k = z_target[:, :K, :]                # (B, K, d_z) — stop_grad via z_target
 
             # Étape 5 — Pertes combinées
-            # Curriculum prec_alpha : 0.0 → 1.0 sur les 30 premiers % du budget
-            # state.step est un jnp.int32 traceable — opérations JAX valides en JIT
-            total_steps_budget = config.n_epochs * 312      # budget de référence (n=10000)
-            alpha_current = jnp.clip(
-                state.step / (total_steps_budget * 0.30),
-                0.0, 1.0,
-            )
+            alpha_current = jnp.array(config.prec_alpha, dtype=jnp.float32)
 
             # Boucle 2 : precision divisive sur les erreurs de prédiction JEPA
             # z_target_k est déjà stop_gradient (R3 — appliqué étape 2)
             errors_jepa = (z_pred - z_target_k).reshape(-1, z_pred.shape[-1])  # (B*K, d_z)
             l_jepa = pc_loss_hybrid(errors_jepa, prec_p_, alpha=alpha_current)
 
-            # l_var sur z_pred ET z_context : protection contre collapse de l'encodeur
-            l_var_pred = loss_variance(
+            # l_var sur z_pred uniquement — l_var_ctx supprimé (conflit gradient exp3)
+            l_var = loss_variance(
                 z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var
             )
-            l_var_ctx = loss_variance(
-                z_context.reshape(-1, z_context.shape[-1]), config.gamma_var
-            )
-            l_var = l_var_pred + l_var_ctx
 
             total = l_jepa + config.lambda_pc * l_pc + config.lambda_var * l_var
 
@@ -277,7 +281,17 @@ def evaluate(
             init_pc_state, pc_w, z_context[:, -1, :], config
         )
 
-        z_pred = apply_predictor(pred_w, z_context, config)
+        if config.use_pc_errors_in_predictor:
+            pc_errors_l0  = pc_converged.errors[0]
+            err_broadcast = jnp.broadcast_to(
+                pc_errors_l0[:, jnp.newaxis, :],
+                (z_context.shape[0], z_context.shape[1], pc_errors_l0.shape[-1])
+            )
+            z_pred_input = jnp.concatenate([z_context, err_broadcast], axis=-1)
+        else:
+            z_pred_input = z_context
+
+        z_pred = apply_predictor(pred_w, z_pred_input, config)
         z_target_k = z_target[:, :config.pred_K, :]
 
         metrics = compute_all_metrics(z_pred, z_target_k, pc_converged, T_conv)
