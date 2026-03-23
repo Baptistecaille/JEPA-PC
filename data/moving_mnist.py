@@ -74,7 +74,9 @@ def _load_mnist_digits(rng: np.random.Generator) -> np.ndarray:
         except Exception:
             # Fallback : carrés synthétiques (tests unitaires / CI sans internet)
             print("[WARNING] MNIST non disponible — utilisation de placeholders synthétiques.")
-            digits = rng.integers(0, 255, size=(1000, 28, 28), dtype=np.uint8)
+            # RNG fixe et indépendant pour ne pas perturber l'état du RNG principal
+            _placeholder_rng = np.random.default_rng(0)
+            digits = _placeholder_rng.integers(0, 255, size=(1000, 28, 28), dtype=np.uint8)
 
     _MNIST_DIGITS_CACHE = digits.astype(np.uint8)
     return _MNIST_DIGITS_CACHE
