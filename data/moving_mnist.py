@@ -49,33 +49,57 @@ class Batch(NamedTuple):
 _MNIST_DIGITS_CACHE: np.ndarray | None = None
 
 
-def _load_mnist_digits(rng: np.random.Generator) -> np.ndarray:
+def _load_mnist_digits() -> np.ndarray:
     """
     Retourne les chiffres MNIST.
-    Télécharge via keras si disponible, sinon génère des placeholders.
-    Résultat mis en cache globalement pour éviter les re-téléchargements.
+    Ordre de priorité :
+      1. Cache mémoire (même processus)
+      2. ~/.keras/datasets/mnist.npz (téléchargé par keras, chargé via numpy pur)
+      3. tensorflow.keras.datasets.mnist
+      4. torchvision MNIST
+      5. Placeholders synthétiques (CI / pas d'internet)
     Shape : (N, 28, 28) uint8
+
+    N'avance JAMAIS le rng de l'appelant : la graine des placeholders est fixe (0),
+    ce qui garantit la reproductibilité de D4 quelle que soit la fréquence d'appel.
     """
     global _MNIST_DIGITS_CACHE
     if _MNIST_DIGITS_CACHE is not None:
         return _MNIST_DIGITS_CACHE
 
+    import os
+
+    # Essai 1 : fichier keras déjà sur disque → numpy pur, pas de TF requis
+    keras_path = os.path.expanduser('~/.keras/datasets/mnist.npz')
+    if os.path.exists(keras_path):
+        try:
+            data   = np.load(keras_path)
+            digits = np.concatenate([data['x_train'], data['x_test']], axis=0)
+            _MNIST_DIGITS_CACHE = digits.astype(np.uint8)
+            return _MNIST_DIGITS_CACHE
+        except Exception:
+            pass   # fichier corrompu → essais suivants
+
+    # Essai 2 : TensorFlow (télécharge et met en cache dans ~/.keras/)
     try:
         import tensorflow as tf
         (x_train, _), (x_test, _) = tf.keras.datasets.mnist.load_data()
-        digits = np.concatenate([x_train, x_test], axis=0)  # (70000, 28, 28)
+        digits = np.concatenate([x_train, x_test], axis=0)
     except Exception:
+        # Essai 3 : torchvision
         try:
-            import torchvision.datasets as datasets
-            import torchvision.transforms as transforms
-            import tempfile, os
+            from torchvision import datasets as tvd
+            import tempfile
             with tempfile.TemporaryDirectory() as tmp:
                 ds = tvd.MNIST(root=tmp, train=True, download=True)
                 digits = ds.data.numpy()   # (60000, 28, 28)
         except Exception:
-            # Fallback : carrés synthétiques (tests unitaires / CI sans internet)
+            # Fallback : carrés synthétiques (CI / sans internet)
+            # Graine fixe (0) : indépendant du rng de l'appelant → reproductible
             print("[WARNING] MNIST non disponible — utilisation de placeholders synthétiques.")
-            digits = rng.integers(0, 255, size=(1000, 28, 28), dtype=np.uint8)
+            digits = np.random.default_rng(0).integers(
+                0, 255, size=(1000, 28, 28), dtype=np.uint8
+            )
 
     _MNIST_DIGITS_CACHE = digits.astype(np.uint8)
     return _MNIST_DIGITS_CACHE
@@ -147,7 +171,7 @@ def get_dataloaders(config: DataConfig) -> tuple:
     Chaque itérateur est une fonction () -> Iterator[Batch].
     """
     rng = np.random.default_rng(config.seed)
-    digits_pool = _load_mnist_digits(rng)
+    digits_pool = _load_mnist_digits()
 
     train_data = _build_dataset(digits_pool, config, config.n_train, rng)
     val_data   = _build_dataset(digits_pool, config, config.n_val,   rng)
@@ -186,7 +210,7 @@ def get_subset_dataloader(
     Seed distinct pour reproductibilité inter-expériences.
     """
     rng = np.random.default_rng(seed)
-    digits_pool = _load_mnist_digits(rng)
+    digits_pool = _load_mnist_digits()
     data = _build_dataset(digits_pool, config, n_samples, rng)
 
     rng_iter = np.random.default_rng(seed)
