@@ -117,7 +117,10 @@ def free_energy(
     )   # (L, B, d_z)
 
     # Énergie pondérée par précision diagonale
-    weighted = 0.5 * jnp.sum(
+    # jnp.mean (pas sum) : normalise par L*B*d_z pour que l_pc soit comparable
+    # à l_jepa (~0.08). Avec sum, l_pc ≈ 24576 * E[e²] >> l_jepa → gradients
+    # PC dominent → ||W_pred||_2 franchit le seuil de stabilité α < 2/||H||_2.
+    weighted = 0.5 * jnp.mean(
         hierarchy_state.precisions * errors ** 2
     )
     return weighted
