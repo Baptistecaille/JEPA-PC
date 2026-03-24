@@ -23,8 +23,8 @@ class ModelConfig(NamedTuple):
     # Predictive Coding
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
     pc_alpha:     float = 0.1     # lr de la boucle d'inférence (stable : α < 2/||H||_2 ≈ 0.22)
-    pc_tol:       float = 0.1   # critère MSE d'arrêt : force la boucle à itérer réellement
-    pc_max_iter:  int   = 200    # nb max d'itérations — laisser converger réellement
+    pc_tol:       float = 0.1     # critère MSE d'arrêt : force la boucle à itérer réellement
+    pc_max_iter:  int   = 200     # nb max d'itérations — laisser converger réellement
 
     # Predictor (Transformer + MLP)
     pred_k_embed: int   = 16      # dim embedding de l'horizon k
@@ -32,10 +32,11 @@ class ModelConfig(NamedTuple):
     pred_K:       int   = 5       # horizon max de prédiction
 
     # Pertes
-    lambda_pc:  float = 0.01       # poids L_PC
-    lambda_var: float = 0.01      # poids L_var
-    gamma_var:  float = 1.0       # variance cible (anti-collapse)
-    prec_alpha: float = 0.0       # curriculum divisif : 0=standard, 1=divisif pur
+    lambda_pc:    float = 0.01    # poids L_PC
+    lambda_pc_l2: float = 1e-3    # L2 sur W_pred : filet de sécurité contre ||W||_2 > sqrt(2/α-1)
+    lambda_var:   float = 0.01    # poids L_var
+    gamma_var:    float = 1.0     # variance cible (anti-collapse)
+    prec_alpha:   float = 0.0     # curriculum divisif : 0=standard, 1=divisif pur
 
     # Transformer (predictor PC-JEPA et baseline partagent ces hyperparamètres)
     trans_n_layers: int = 1       # 1 couche → ~935K params (parité ≤25%)

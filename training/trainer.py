@@ -203,7 +203,14 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
                 z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var
             )
 
-            total = l_jepa + config.lambda_pc * l_pc + config.lambda_var * l_var
+            # L2 sur W_pred : filet de sécurité pour garder ||W_pred||_2 < sqrt(2/α-1) ≈ 4.36
+            # Empêche la croissance lente accumulée par Adam de franchir le seuil de stabilité.
+            l2_pc = jnp.mean(jnp.stack([jnp.mean(w ** 2) for w in pc_w_.W_pred]))
+
+            total = (l_jepa
+                     + config.lambda_pc    * l_pc
+                     + config.lambda_var   * l_var
+                     + config.lambda_pc_l2 * l2_pc)
 
             aux = {
                 'loss_total': total,
