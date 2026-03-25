@@ -334,16 +334,28 @@ def init_pc_from_encoding(
     """
     Crée un PCHierarchyState initialisé depuis z_last (dernière frame encodée).
     z_last : (B, d_z)
-    """
-    key = jax.random.PRNGKey(0)   # seed fixe pour l'init (non aléatoire)
-    state = init_pc_hierarchy(key, config, z_last.shape[0], z_last)
 
-    # Calcul initial des erreurs
-    errors = _compute_errors(state.representations, weights, z_last)
+    Niveaux 1..L-1 initialisés à ZÉRO (Rao & Ballard 1999, Bogacz 2017).
+    Avec x_l=0 pour l>0 :
+      ε^0 = obs - W_pred[0] @ 0 = obs  →  MSE_init ≈ mean(obs²) ≈ 1
+    La boucle d'inférence a du vrai travail à faire dès le premier appel.
+
+    NE PAS utiliser PRNGKey fixe + bruit aléatoire : W_pred mémoriserait le
+    pattern de bruit fixe et la condition initiale passerait sous pc_tol sans
+    aucun pas d'inférence (T_conv=0 pathologique).
+    """
+    L = config.pc_n_layers
+    B = z_last.shape[0]
+
+    reprs_list = [z_last] + [jnp.zeros((B, config.d_z)) for _ in range(L - 1)]
+    representations = jnp.stack(reprs_list, axis=0)   # (L, B, d_z)
+    precisions      = jnp.ones((L, B, config.d_z))
+
+    errors = _compute_errors(representations, weights, z_last)
     return PCHierarchyState(
-        representations = state.representations,
+        representations = representations,
         errors          = errors,
-        precisions      = state.precisions,
+        precisions      = precisions,
     )
 
 
