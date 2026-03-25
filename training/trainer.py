@@ -198,10 +198,12 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             errors_jepa = (z_pred - z_target_k).reshape(-1, z_pred.shape[-1])  # (B*K, d_z)
             l_jepa = pc_loss_hybrid(errors_jepa, prec_p_, alpha=alpha_current)
 
-            # l_var sur z_pred uniquement — l_var_ctx supprimé (conflit gradient exp3)
-            l_var = loss_variance(
-                z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var
-            )
+            # l_var sur z_pred ET z_context : protection contre collapse différentiel
+            # z_context sans l_var → encodeur collapse d'autant plus vite avec peu de données
+            # → z_target ≈ constante → NMSE artificiellement bas pour n petit
+            l_var_pred = loss_variance(z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var)
+            l_var_ctx  = loss_variance(z_context.reshape(-1, z_context.shape[-1]), config.gamma_var)
+            l_var = l_var_pred + l_var_ctx
 
             # L2 sur W_pred : filet de sécurité pour garder ||W_pred||_2 < sqrt(2/α-1) ≈ 4.36
             # Empêche la croissance lente accumulée par Adam de franchir le seuil de stabilité.

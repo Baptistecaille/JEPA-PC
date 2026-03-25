@@ -34,7 +34,7 @@ class ModelConfig(NamedTuple):
     # Pertes
     lambda_pc:    float = 0.01    # poids L_PC
     lambda_pc_l2: float = 1e-3    # L2 sur W_pred : filet de sécurité contre ||W||_2 > sqrt(2/α-1)
-    lambda_var:   float = 0.01    # poids L_var
+    lambda_var:   float = 0.1     # poids L_var (0.01 → 0.1 : empêche collapse différentiel selon n)
     gamma_var:    float = 1.0     # variance cible (anti-collapse)
     prec_alpha:   float = 0.0     # curriculum divisif : 0=standard, 1=divisif pur
 

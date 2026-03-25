@@ -24,12 +24,12 @@ import optax
 # Configuration de l'expérience (R7 — constantes nommées)
 # ---------------------------------------------------------------------------
 
-EFFICIENCY_NS  = (100, 1000, 4000)
+EFFICIENCY_NS  = (100, 500, 1000, 2000, 5000, 10000)
 SEEDS          = (42, 137)
-N_EPOCHS_SHORT = 50    # budget réduit pour les petits n
-N_EPOCHS_FULL  = 100   # budget complet pour n ≥ 2000
+N_EPOCHS_SHORT = 100   # même budget epochs pour tous les n (comparaison équitable)
+N_EPOCHS_FULL  = 100   # idem
 
-N_THRESHOLD_FULL = 2000   # seuil n ≥ N_THRESHOLD_FULL → N_EPOCHS_FULL
+N_THRESHOLD_FULL = 0     # tous les n utilisent N_EPOCHS_FULL
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +210,7 @@ def run_exp2(config: ModelConfig, data_config: DataConfig = None) -> dict:
 
     # Vérification budget warmup par n (assure warmup ≤ 10% du budget)
     print("\n[Check] Budget warmup par n :")
-    for n_check in [100, 250, 500, 1000, 10000]:
+    for n_check in EFFICIENCY_NS:
         steps_check  = _steps_for(n_check, data_config.batch_size)
         warmup_check = min(config.warmup_steps, steps_check // 10)
         pct = warmup_check / steps_check * 100
@@ -226,7 +226,7 @@ def run_exp2(config: ModelConfig, data_config: DataConfig = None) -> dict:
     total = len(EFFICIENCY_NS) * len(SEEDS) * 2
     done  = 0
 
-    for model_type in ['pc_jepa']:
+    for model_type in ['pc_jepa', 'transformer']:
         for n in EFFICIENCY_NS:
             for seed in SEEDS:
                 done += 1
