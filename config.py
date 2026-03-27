@@ -38,6 +38,19 @@ class ModelConfig(NamedTuple):
     gamma_var:    float = 1.0     # variance cible (anti-collapse)
     prec_alpha:   float = 0.0     # curriculum divisif : 0=standard, 1=divisif pur
 
+    # SIGReg — régularisation Gaussienne isotrope (LeWM, optionnel)
+    # Désactivé par défaut (lambda_sigreg=0) : la boucle PC remplace l'EMA comme
+    # mécanisme anti-collapse. Activer pour ablation : PC seul vs PC+SIGReg.
+    lambda_sigreg: float = 0.0    # 0 = désactivé ; 1e-2 recommandé pour ablation
+    sigreg_n_proj: int   = 64     # nb de projections aléatoires (Epps-Pulley)
+
+    # EMA — volontairement absent (pas de flag use_ema=True supporté)
+    # Justification : la boucle d'inférence PC (Boucle 1) est le mécanisme
+    # anti-collapse par principe variationnel explicite — elle remplace l'EMA
+    # de I-JEPA qui n'a pas de justification formelle (LeWM §3.2).
+    # Garder l'EMA affaiblirait la contribution centrale.
+    # Pour l'ablation : comparer PC (ce code) vs PC+EMA via un fork séparé.
+
     # Transformer (predictor PC-JEPA et baseline partagent ces hyperparamètres)
     trans_n_layers: int = 1       # 1 couche → ~935K params (parité ≤25%)
     trans_n_heads:  int = 4       # têtes d'attention (d_z doit être divisible)

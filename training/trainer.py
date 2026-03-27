@@ -27,7 +27,7 @@ from models.pc_nodes import (
     PCWeights, init_pc_weights, init_pc_from_encoding, run_inference_loop,
     pc_weights_to_flat_dict, flat_dict_to_pc_weights,
 )
-from training.losses import loss_variance
+from training.losses import loss_variance, sigreg_loss
 from models.pc_nodes import free_energy
 from data.moving_mnist import Batch, DataConfig
 from precision.module import PrecisionParams, init_precision_params, enforce_pv_constraints
@@ -209,19 +209,30 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             # Empêche la croissance lente accumulée par Adam de franchir le seuil de stabilité.
             l2_pc = jnp.mean(jnp.stack([jnp.mean(w ** 2) for w in pc_w_.W_pred]))
 
+            # SIGReg (désactivé par défaut, lambda_sigreg=0 → aucun overhead)
+            # Clé dérivée de (state.key, step) : varie à chaque pas sans muter l'état.
+            sk_sigreg = jax.random.fold_in(state.key, state.step)
+            l_sigreg = sigreg_loss(
+                z_context.reshape(-1, z_context.shape[-1]),
+                sk_sigreg,
+                config.sigreg_n_proj,
+            )
+
             total = (l_jepa
-                     + config.lambda_pc    * l_pc
-                     + config.lambda_var   * l_var
-                     + config.lambda_pc_l2 * l2_pc)
+                     + config.lambda_pc     * l_pc
+                     + config.lambda_var    * l_var
+                     + config.lambda_pc_l2  * l2_pc
+                     + config.lambda_sigreg * l_sigreg)
 
             aux = {
-                'loss_total': total,
-                'loss_jepa':  l_jepa,
-                'loss_pc':    l_pc,
-                'loss_var':   l_var,
-                'T_conv':     T_conv,
-                'pc_error':   final_err,
-                'prec_alpha': alpha_current,   # monitoring du curriculum
+                'loss_total':  total,
+                'loss_jepa':   l_jepa,
+                'loss_pc':     l_pc,
+                'loss_var':    l_var,
+                'loss_sigreg': l_sigreg,
+                'T_conv':      T_conv,
+                'pc_error':    final_err,
+                'prec_alpha':  alpha_current,
             }
             return total, aux
 
@@ -358,6 +369,10 @@ def train(
         if step % log_every == 0:
             history['train_loss'].append(float(metrics['loss_total']))
             history['T_conv'].append(float(metrics['T_conv']))
+            sigreg_str = (
+                f"  sigreg={float(metrics['loss_sigreg']):.4f}"
+                if config.lambda_sigreg > 0.0 else ""
+            )
             print(
                 f"  step={step:5d}  "
                 f"loss={float(metrics['loss_total']):.4f}  "
@@ -366,6 +381,7 @@ def train(
                 f"var={float(metrics['loss_var']):.4f}  "
                 f"T_conv={int(metrics['T_conv']):3d}  "
                 f"α={float(metrics['prec_alpha']):.3f}"
+                + sigreg_str
             )
 
         if step % eval_every == 0 and step > 0:

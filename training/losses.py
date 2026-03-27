@@ -76,6 +76,42 @@ def loss_variance(z: jnp.ndarray, gamma: float) -> jnp.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# L_SIGReg — régularisation Gaussienne isotrope (LeWM)
+# ---------------------------------------------------------------------------
+
+def sigreg_loss(
+    z: jnp.ndarray,
+    key: jax.random.PRNGKey,
+    n_projections: int = 64,
+) -> jnp.ndarray:
+    """
+    SIGReg : force z vers une Gaussienne isotrope via projections aléatoires.
+
+    Pour chaque direction aléatoire u ~ Unif(S^{d-1}) :
+      - projette z sur u : s = z @ u  (scalaires)
+      - pénalise E[s] ≠ 0 et Var[s] ≠ 1
+
+    L_SIGReg = mean_u [ E[s]² + (std[s] - 1)² ]
+
+    Test d'Epps-Pulley univarié, appliqué à n_projections directions.
+    Désactivé par défaut (lambda_sigreg=0). Activer pour ablation :
+      PC seul vs PC+SIGReg vs Transformer+SIGReg.
+
+    z            : (N, d_z)  — représentations à régulariser (après reshape)
+    key          : PRNGKey   — pour les projections aléatoires (doit varier à chaque step)
+    n_projections: int       — nb de directions (config.sigreg_n_proj)
+    return       : scalaire float32
+    """
+    d_z = z.shape[-1]
+    directions = jax.random.normal(key, (n_projections, d_z))              # (P, d_z)
+    directions = directions / jnp.linalg.norm(directions, axis=-1, keepdims=True)  # normées
+    projections = z @ directions.T                                          # (N, P)
+    mu    = jnp.mean(projections, axis=0)                                   # (P,)
+    sigma = jnp.std(projections, axis=0)                                    # (P,)
+    return jnp.mean(mu ** 2 + (sigma - 1.0) ** 2)
+
+
+# ---------------------------------------------------------------------------
 # Perte totale
 # ---------------------------------------------------------------------------
 
