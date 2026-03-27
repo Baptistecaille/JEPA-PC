@@ -218,7 +218,8 @@ def run_inference_loop(
             state, weights, obs_embedding, config.pc_alpha
         )
         new_err = compute_max_error(new_state)
-        new_converged = converged | (new_err < config.pc_tol)
+        finite_err = jnp.isfinite(new_err)
+        new_converged = converged | (finite_err & (new_err <= config.pc_tol))
         # Masquer les mises à jour une fois convergé
         masked_state = jax.tree.map(
             lambda new, old: jnp.where(converged, old, new),
@@ -226,13 +227,19 @@ def run_inference_loop(
         )
         return (masked_state, new_converged), new_err
 
-    init_carry = (init_state, jnp.array(False))
-    (final_state, _), energies = jax.lax.scan(
+    init_err = compute_max_error(init_state)
+    init_converged = jnp.isfinite(init_err) & (init_err <= config.pc_tol)
+    init_carry = (init_state, init_converged)
+    (final_state, _), step_energies = jax.lax.scan(
         scan_fn, init_carry, jnp.arange(config.pc_n_inference_steps)
     )
     final_err = compute_max_error(final_state)
-    # T_conv : premier pas où MSE < pc_tol (ou n_inference_steps si jamais)
-    converged_mask = energies < config.pc_tol
+    # T_conv : premier pas où MSE <= pc_tol (ou n_inference_steps si jamais)
+    # On préfixe avec l'erreur initiale pour conserver la même sémantique
+    # que l'ancienne while_loop et la version debug.
+    energies = jnp.concatenate([init_err[None], step_energies], axis=0)
+    finite_mask = jnp.isfinite(energies)
+    converged_mask = finite_mask & (energies <= config.pc_tol)
     T_conv = jnp.where(
         converged_mask.any(),
         jnp.argmax(converged_mask).astype(jnp.int32),
@@ -345,8 +352,8 @@ def init_pc_from_encoding(
     z_last : (B, d_z)
 
     Deux modes (config.pc_init_mode) :
-      "feedforward" : propage z_last vers le haut via W_pred (convergence rapide)
       "zeros"       : niveaux 1..L-1 à zéro (Rao & Ballard 1999, Bogacz 2017)
+      "feedforward" : approxime l'inverse de la prédiction descendante via pseudo-inverse
     """
     L = config.pc_n_layers
     B = z_last.shape[0]
@@ -354,11 +361,13 @@ def init_pc_from_encoding(
     reprs_list = [z_last]
 
     if config.pc_init_mode == "feedforward":
-        # Propager obs vers le haut : x_{l+1} = W_pred[l]^T x_l + b_pred[l]
-        # (inverse de la prédiction descendante) pour démarrer proche de l'équilibre
+        # Approximation least-squares de x_{l+1} à partir de x_l :
+        # x_l ≈ x_{l+1} @ W_pred[l].T + b_pred[l]
+        # donc x_{l+1} ≈ (x_l - b_pred[l]) @ pinv(W_pred[l].T).
         x = z_last
         for l in range(L - 1):
-            x = x @ weights.W_pred[l].T + weights.b_pred[l]
+            w_t_pinv = jnp.linalg.pinv(weights.W_pred[l].T)
+            x = (x - weights.b_pred[l]) @ w_t_pinv
             reprs_list.append(x)
     else:  # "zeros"
         reprs_list.extend([jnp.zeros((B, config.d_z)) for _ in range(L - 1)])

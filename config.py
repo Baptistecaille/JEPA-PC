@@ -23,9 +23,9 @@ class ModelConfig(NamedTuple):
     # Predictive Coding
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
     pc_alpha:     float = 0.1     # lr de la boucle d'inférence (stable : α < 2/||H||_2 ≈ 0.22)
-    pc_tol:       float = 0.01    # critère MSE d'arrêt (standard PC : Rao & Ballard 1999)
+    pc_tol:       float = 0.1     # critère MSE d'arrêt atteignable avec l'échelle d'erreur actuelle
     pc_n_inference_steps: int = 50 # nb fixe de pas d'inférence (lax.scan, coût constant)
-    pc_init_mode: str = "feedforward"  # "feedforward" (propage obs via W_pred) | "zeros" (Rao & Ballard)
+    pc_init_mode: str = "zeros"   # "zeros" (robuste, Rao & Ballard) | "feedforward" (pseudo-inverse)
 
     # Predictor (Transformer + MLP)
     pred_k_embed: int   = 16      # dim embedding de l'horizon k
