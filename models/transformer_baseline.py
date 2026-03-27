@@ -320,8 +320,10 @@ def make_transformer_train_step(
             z_target_k = z_target[:, :config.pred_K, :]
 
             l_j = loss_jepa(z_pred, z_target_k)
-            l_v = loss_variance(
-                z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var
+            # Anti-collapse sur z_pred ET z_context (parité avec PC-JEPA)
+            l_v = (
+                loss_variance(z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var)
+                + loss_variance(z_context.reshape(-1, z_context.shape[-1]), config.gamma_var)
             )
             total = l_j + config.lambda_var * l_v
             return total, {'loss_total': total, 'loss_jepa': l_j, 'loss_var': l_v}

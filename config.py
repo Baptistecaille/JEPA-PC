@@ -24,7 +24,8 @@ class ModelConfig(NamedTuple):
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
     pc_alpha:     float = 0.1     # lr de la boucle d'inférence (stable : α < 2/||H||_2 ≈ 0.22)
     pc_tol:       float = 0.01    # critère MSE d'arrêt (standard PC : Rao & Ballard 1999)
-    pc_max_iter:  int   = 500     # élevé pour garantir convergence avec pc_tol=0.01
+    pc_n_inference_steps: int = 50 # nb fixe de pas d'inférence (lax.scan, coût constant)
+    pc_init_mode: str = "feedforward"  # "feedforward" (propage obs via W_pred) | "zeros" (Rao & Ballard)
 
     # Predictor (Transformer + MLP)
     pred_k_embed: int   = 16      # dim embedding de l'horizon k
@@ -46,12 +47,11 @@ class ModelConfig(NamedTuple):
     anti_collapse_mode: str = "var"
     sigreg_n_proj:      int = 64   # projections aléatoires pour anti_collapse_mode="sigreg"
 
-    # EMA — volontairement absent (pas de flag use_ema=True supporté)
-    # Justification : la boucle d'inférence PC (Boucle 1) est le mécanisme
-    # anti-collapse par principe variationnel explicite — elle remplace l'EMA
-    # de I-JEPA qui n'a pas de justification formelle (LeWM §3.2).
-    # Garder l'EMA affaiblirait la contribution centrale.
-    # Pour l'ablation : comparer PC (ce code) vs PC+EMA via un fork séparé.
+    # EMA — optionnel (désactivé par défaut, activable pour ablation)
+    # La boucle d'inférence PC (Boucle 1) est le mécanisme anti-collapse principal.
+    # L'EMA peut être activé pour ablation : comparer PC vs PC+EMA.
+    use_ema:   bool  = False     # activer l'EMA sur l'encodeur cible
+    ema_tau:   float = 0.996     # momentum EMA (anneal vers 1.0 via cosine schedule)
 
     # Transformer (predictor PC-JEPA et baseline partagent ces hyperparamètres)
     trans_n_layers: int = 1       # 1 couche → ~935K params (parité ≤25%)

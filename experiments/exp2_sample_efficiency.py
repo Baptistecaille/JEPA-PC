@@ -26,24 +26,21 @@ import optax
 
 EFFICIENCY_NS  = (100, 500, 1000, 2000, 5000, 10000)
 SEEDS          = (42, 137)
-N_EPOCHS_SHORT = 100   # même budget epochs pour tous les n (comparaison équitable)
-N_EPOCHS_FULL  = 100   # idem
-
-N_THRESHOLD_FULL = 0     # tous les n utilisent N_EPOCHS_FULL
+N_FIXED_STEPS  = 5000   # budget fixe identique pour tous les n (comparaison équitable)
 
 
 # ---------------------------------------------------------------------------
 # Utilitaires
 # ---------------------------------------------------------------------------
 
-def _n_epochs_for(n: int) -> int:
-    return N_EPOCHS_FULL if n >= N_THRESHOLD_FULL else N_EPOCHS_SHORT
-
-
 def _steps_for(n: int, batch_size: int) -> int:
-    n_epochs = _n_epochs_for(n)
-    steps_per_epoch = max(n // batch_size, 1)
-    return n_epochs * steps_per_epoch
+    """Budget fixe : même nombre de gradient steps quel que soit n.
+
+    Ceci évite le confound précédent où steps ∝ n (n=100 → 300 steps,
+    n=10000 → 31200 steps), rendant la comparaison de sample efficiency
+    impossible à interpréter.
+    """
+    return N_FIXED_STEPS
 
 
 def save_results(results: dict, tag: str = 'exp2') -> str:
@@ -208,13 +205,11 @@ def run_exp2(config: ModelConfig, data_config: DataConfig = None) -> dict:
     # Test set partagé entre tous les modèles (même données, même seed)
     _, _, test_fn = get_dataloaders(data_config)
 
-    # Vérification budget warmup par n (assure warmup ≤ 10% du budget)
-    print("\n[Check] Budget warmup par n :")
-    for n_check in EFFICIENCY_NS:
-        steps_check  = _steps_for(n_check, data_config.batch_size)
-        warmup_check = min(config.warmup_steps, steps_check // 10)
-        pct = warmup_check / steps_check * 100
-        print(f"  n={n_check:6d} → {steps_check:5d} steps, warmup={warmup_check:3d} ({pct:.0f}%)")
+    # Vérification budget (fixe pour tous les n)
+    steps_check  = _steps_for(EFFICIENCY_NS[0], data_config.batch_size)
+    warmup_check = min(config.warmup_steps, steps_check // 10)
+    pct = warmup_check / steps_check * 100
+    print(f"\n[Check] Budget fixe : {steps_check} steps, warmup={warmup_check} ({pct:.0f}%)")
 
     print("=" * 60)
     print("[Exp2] Sample Efficiency — PC-JEPA vs Transformer")

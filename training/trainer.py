@@ -4,11 +4,11 @@ Rôle : Orchestration des deux boucles, logging, interface pour experiments/
 Invariants:
   - ORDRE IMMUABLE dans train_step :
       1. Encoder contexte
-      2. Encoder cible avec STOP GRADIENT (R3)
-      3. Boucle 1 — inférence PC (états libres, poids figés)
+      2. Encoder cible avec STOP GRADIENT (R3) — EMA optionnel
+      3. Boucle 1 — inférence PC via lax.scan (états libres, poids figés)
       4. Predictor
       5. Calcul des pertes
-      6. Boucle 2 — mise à jour poids (optax)
+      6. Boucle 2 — mise à jour poids (optax) + EMA update
       7. Logging
   - TrainState est un NamedTuple (R4)
   - Reproductibilité via key JAX (R5)
@@ -41,13 +41,14 @@ from precision.losses import pc_loss_hybrid
 
 class TrainState(NamedTuple):
     """État global de l'entraînement — tout ce qui change au fil du temps."""
-    encoder_weights:   dict
-    predictor_weights: dict
-    pc_weights_flat:   dict          # dict plat (compatible optax)
-    prec_params:       PrecisionParams  # module de précision divisive
-    optimizer_state:   optax.OptState
-    step:              int
-    key:               jax.random.PRNGKey
+    encoder_weights:        dict
+    predictor_weights:      dict
+    pc_weights_flat:        dict          # dict plat (compatible optax)
+    prec_params:            PrecisionParams  # module de précision divisive
+    optimizer_state:        optax.OptState
+    step:                   int
+    key:                    jax.random.PRNGKey
+    target_encoder_weights: dict          # EMA encodeur cible (= encoder_weights si use_ema=False)
 
 
 def _build_optimizer(
@@ -94,14 +95,18 @@ def create_train_state(config: ModelConfig) -> TrainState:
     optimizer = _build_optimizer(config)
     opt_state = optimizer.init(all_weights)
 
+    # EMA : copie initiale de l'encodeur (identique au départ)
+    target_enc_w = jax.tree.map(jnp.copy, enc_w)
+
     return TrainState(
-        encoder_weights   = enc_w,
-        predictor_weights = pred_w,
-        pc_weights_flat   = pc_flat,
-        prec_params       = prec_p,
-        optimizer_state   = opt_state,
-        step              = 0,
-        key               = key,
+        encoder_weights        = enc_w,
+        predictor_weights      = pred_w,
+        pc_weights_flat        = pc_flat,
+        prec_params            = prec_p,
+        optimizer_state        = opt_state,
+        step                   = 0,
+        key                    = key,
+        target_encoder_weights = target_enc_w,
     )
 
 
@@ -147,27 +152,28 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             obs = z_context[:, -1, :]                           # (B, d_z)
 
             # Étape 2 — Encodage cible avec STOP GRADIENT (R3)
+            # EMA : utiliser target_encoder_weights si use_ema=True
+            target_enc = state.target_encoder_weights if config.use_ema else enc_w_
             z_target = jax.lax.stop_gradient(
-                apply_encoder(enc_w_, batch.target)             # (B, T_pred, d_z)
+                apply_encoder(target_enc, batch.target)         # (B, T_pred, d_z)
             )
 
             # Étape 3 — Boucle 1 : inférence PC (poids figés, états libres)
-            # CRITIQUE : jax.lax.while_loop ne supporte pas le reverse-mode autodiff.
-            # On applique stop_gradient sur tout le résultat de la boucle d'inférence.
-            # Le gradient des poids PC (Boucle 2) est calculé séparément via
-            # free_energy(sg(x*), W, sg(obs)) — règle de Hebb, pas backprop dans la boucle.
+            # lax.scan est différentiable — plus besoin de stop_gradient global.
+            # Le gradient des poids PC (Boucle 2) est calculé via la règle de Hebb :
+            # free_energy(sg(x*), W, sg(obs)) — x* figé explicitement ci-dessous.
             init_pc_state = init_pc_from_encoding(obs, pc_w_, config)
-            pc_converged, T_conv, final_err = jax.lax.stop_gradient(
-                run_inference_loop(init_pc_state, pc_w_, obs, config)
+            pc_converged, T_conv, final_err = run_inference_loop(
+                init_pc_state, pc_w_, obs, config
             )
 
             # Étape 3b — Perte PC : gradient w.r.t. W via F(sg(x*), W, sg(obs))
-            # x* et obs sont stop_gradient ; W_pred apparaît explicitement dans F.
+            # x* et obs sont stop_gradient explicites ; W_pred apparaît dans F.
             # C'est la règle d'apprentissage Hebbienne du Predictive Coding.
             l_pc = free_energy(
-                pc_converged,                      # x* déjà stop_gradient (ligne ci-dessus)
-                pc_w_,                             # W — gradient autorisé
-                jax.lax.stop_gradient(obs),        # obs figé
+                jax.lax.stop_gradient(pc_converged),  # x* figé (Hebb)
+                pc_w_,                                 # W — gradient autorisé
+                jax.lax.stop_gradient(obs),            # obs figé
             )
 
             # Étape 4 — Construction de l'input predictor
@@ -258,14 +264,25 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
         # Contraintes biologiques PV après update gradient (positivité + diag=0 + norm)
         new_prec_p = enforce_pv_constraints(new_weights['prec'])
 
+        # EMA update de l'encodeur cible
+        if config.use_ema:
+            new_target_enc = jax.tree.map(
+                lambda t, o: config.ema_tau * t + (1.0 - config.ema_tau) * o,
+                state.target_encoder_weights,
+                new_weights['enc'],
+            )
+        else:
+            new_target_enc = state.target_encoder_weights
+
         new_state = TrainState(
-            encoder_weights   = new_weights['enc'],
-            predictor_weights = new_weights['pred'],
-            pc_weights_flat   = new_weights['pc'],
-            prec_params       = new_prec_p,
-            optimizer_state   = new_opt_state,
-            step              = state.step + 1,
-            key               = state.key,
+            encoder_weights        = new_weights['enc'],
+            predictor_weights      = new_weights['pred'],
+            pc_weights_flat        = new_weights['pc'],
+            prec_params            = new_prec_p,
+            optimizer_state        = new_opt_state,
+            step                   = state.step + 1,
+            key                    = state.key,
+            target_encoder_weights = new_target_enc,
         )
         return new_state, metrics
 

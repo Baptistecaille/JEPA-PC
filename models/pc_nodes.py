@@ -6,8 +6,8 @@ Sorties  : PCHierarchyState convergé + métriques (T_conv, final_error)
 Invariants:
   - BOUCLE 1 (inférence) : poids figés, états x libres (R2)
   - BOUCLE 2 (apprentissage) : appelée depuis trainer.py, pas ici
-  - jax.lax.while_loop pour la convergence (JIT-compatible)
-  - Shapes statiques dans le carry de while_loop
+  - jax.lax.scan pour l'inférence (JIT-compatible, différentiable)
+  - Shapes statiques dans le carry de scan
   - Niveau 0 ancré sur obs_embedding (pas mis à jour par la boucle)
   - Energie libre F = Σ_l (1/2) ε^l^T Π^l ε^l avec ε^l = x^l - W^l x^{l+1}
 === FIN SPEC ===
@@ -183,10 +183,10 @@ def compute_max_error(state: PCHierarchyState) -> jnp.ndarray:
 
     Remplace le L∞ (jnp.max(jnp.abs(errors))) qui imposait que les 24 576
     scalaires (L=3, B=32, d_z=256) soient simultanément < pc_tol — condition
-    virtuellement impossible en pratique, causant T_conv = pc_max_iter systématique.
+    virtuellement impossible en pratique, causant T_conv = pc_n_inference_steps systématique.
 
     Le MSE est cohérent avec la loss JEPA et converge vers des valeurs O(1e-4)
-    atteignables avec pc_max_iter=100 et pc_alpha=0.1.
+    atteignables avec pc_n_inference_steps=50 et pc_alpha=0.1.
 
     Scalaire float32.
     """
@@ -200,31 +200,44 @@ def run_inference_loop(
     config: ModelConfig,
 ) -> Tuple[PCHierarchyState, jnp.ndarray, jnp.ndarray]:
     """
-    Boucle d'inférence complète — compilée JIT via jax.lax.while_loop.
+    Boucle d'inférence complète — compilée JIT via jax.lax.scan.
 
     R2 : Boucle 1 uniquement. Poids figés, états libres.
+    Utilise lax.scan (coût fixe, différentiable) au lieu de while_loop.
+    Une fois convergé (MSE < pc_tol), les updates sont masqués pour
+    préserver le point fixe tout en gardant le scan à coût constant.
 
     Returns:
         converged_state : PCHierarchyState après convergence
-        T_conv          : int32 — nb d'itérations
+        T_conv          : int32 — nb d'itérations avant convergence
         final_error     : float32 — ||ε|| final
     """
-    def cond_fn(carry):
-        state, t, err = carry
-        not_converged = err > config.pc_tol
-        not_maxed     = t < config.pc_max_iter
-        return jnp.logical_and(not_converged, not_maxed)
-
-    def body_fn(carry):
-        state, t, _ = carry
+    def scan_fn(carry, _):
+        state, converged = carry
         new_state = inference_step_fn(
             state, weights, obs_embedding, config.pc_alpha
         )
         new_err = compute_max_error(new_state)
-        return (new_state, t + 1, new_err)
+        new_converged = converged | (new_err < config.pc_tol)
+        # Masquer les mises à jour une fois convergé
+        masked_state = jax.tree.map(
+            lambda new, old: jnp.where(converged, old, new),
+            new_state, state,
+        )
+        return (masked_state, new_converged), new_err
 
-    init_carry = (init_state, jnp.int32(0), jnp.array(jnp.inf, dtype=jnp.float32))
-    final_state, T_conv, final_err = jax.lax.while_loop(cond_fn, body_fn, init_carry)
+    init_carry = (init_state, jnp.array(False))
+    (final_state, _), energies = jax.lax.scan(
+        scan_fn, init_carry, jnp.arange(config.pc_n_inference_steps)
+    )
+    final_err = compute_max_error(final_state)
+    # T_conv : premier pas où MSE < pc_tol (ou n_inference_steps si jamais)
+    converged_mask = energies < config.pc_tol
+    T_conv = jnp.where(
+        converged_mask.any(),
+        jnp.argmax(converged_mask).astype(jnp.int32),
+        jnp.int32(config.pc_n_inference_steps),
+    )
     return final_state, T_conv, final_err
 
 
@@ -249,7 +262,7 @@ def run_inference_loop_debug(
     state = init_state
     error_history = []
 
-    for t in range(config.pc_max_iter):
+    for t in range(config.pc_n_inference_steps):
         err = float(compute_max_error(state))
         error_history.append(err)
         if err <= config.pc_tol:
@@ -258,7 +271,7 @@ def run_inference_loop_debug(
 
     err = float(compute_max_error(state))
     error_history.append(err)
-    return state, config.pc_max_iter, error_history
+    return state, config.pc_n_inference_steps, error_history
 
 
 # ---------------------------------------------------------------------------
@@ -282,11 +295,7 @@ def init_pc_weights(key: jax.random.PRNGKey, config: ModelConfig) -> PCWeights:
         W_pred_list.append(W)
         b_pred_list.append(b)
 
-    # Dernier niveau : pas de W_pred (prior à zéro)
-    # On ajoute un niveau supplémentaire pour la cohérence d'indexation
-    key, sk = jax.random.split(key)
-    W_pred_list.append(jax.random.normal(sk, (config.d_z, config.d_z)) * std)
-    b_pred_list.append(jnp.zeros((config.d_z,)))
+    # Pas de W_pred pour le dernier niveau (prior à zéro, cf _compute_errors)
 
     return PCWeights(
         W_pred = tuple(W_pred_list),
@@ -303,8 +312,8 @@ def init_pc_hierarchy(
     """
     Initialise PCHierarchyState.
     Niveau 0 ancré sur obs_embedding.
-    Niveaux 1..L-1 initialisés avec du bruit gaussien léger (σ=0.1)
-    pour garantir compute_max_error(init_state) > pc_tol au démarrage.
+    Niveaux 1..L-1 initialisés avec du bruit gaussien (σ=1.0).
+    Version legacy — utiliser init_pc_from_encoding pour le training.
     """
     L = config.pc_n_layers
     B = batch_size
@@ -335,19 +344,25 @@ def init_pc_from_encoding(
     Crée un PCHierarchyState initialisé depuis z_last (dernière frame encodée).
     z_last : (B, d_z)
 
-    Niveaux 1..L-1 initialisés à ZÉRO (Rao & Ballard 1999, Bogacz 2017).
-    Avec x_l=0 pour l>0 :
-      ε^0 = obs - W_pred[0] @ 0 = obs  →  MSE_init ≈ mean(obs²) ≈ 1
-    La boucle d'inférence a du vrai travail à faire dès le premier appel.
-
-    NE PAS utiliser PRNGKey fixe + bruit aléatoire : W_pred mémoriserait le
-    pattern de bruit fixe et la condition initiale passerait sous pc_tol sans
-    aucun pas d'inférence (T_conv=0 pathologique).
+    Deux modes (config.pc_init_mode) :
+      "feedforward" : propage z_last vers le haut via W_pred (convergence rapide)
+      "zeros"       : niveaux 1..L-1 à zéro (Rao & Ballard 1999, Bogacz 2017)
     """
     L = config.pc_n_layers
     B = z_last.shape[0]
 
-    reprs_list = [z_last] + [jnp.zeros((B, config.d_z)) for _ in range(L - 1)]
+    reprs_list = [z_last]
+
+    if config.pc_init_mode == "feedforward":
+        # Propager obs vers le haut : x_{l+1} = W_pred[l]^T x_l + b_pred[l]
+        # (inverse de la prédiction descendante) pour démarrer proche de l'équilibre
+        x = z_last
+        for l in range(L - 1):
+            x = x @ weights.W_pred[l].T + weights.b_pred[l]
+            reprs_list.append(x)
+    else:  # "zeros"
+        reprs_list.extend([jnp.zeros((B, config.d_z)) for _ in range(L - 1)])
+
     representations = jnp.stack(reprs_list, axis=0)   # (L, B, d_z)
     precisions      = jnp.ones((L, B, config.d_z))
 
@@ -370,9 +385,9 @@ def pc_weights_to_flat_dict(weights: PCWeights) -> dict:
 
 def flat_dict_to_pc_weights(flat: dict, config: ModelConfig) -> PCWeights:
     """Reconstruit PCWeights depuis un dict plat."""
-    L = config.pc_n_layers
-    W_pred = tuple(flat[f'W_pred_{l}'] for l in range(L))
-    b_pred = tuple(flat[f'b_pred_{l}'] for l in range(L))
+    n_connections = config.pc_n_layers - 1
+    W_pred = tuple(flat[f'W_pred_{l}'] for l in range(n_connections))
+    b_pred = tuple(flat[f'b_pred_{l}'] for l in range(n_connections))
     return PCWeights(W_pred=W_pred, b_pred=b_pred)
 
 
@@ -388,7 +403,7 @@ def run_sanity_checks_pc(config: ModelConfig) -> None:
     [I2] inference_step_fn réduit ||ε|| au fil des itérations
     [I3] run_inference_loop est JIT-compilable
     [I4] Les poids ne sont pas modifiés pendant la boucle d'inférence
-    [I5] T_conv ≤ pc_max_iter
+    [I5] T_conv ≤ pc_n_inference_steps
     """
     print("[Sanity] models.pc_nodes — début")
 
@@ -427,7 +442,7 @@ def run_sanity_checks_pc(config: ModelConfig) -> None:
 
     # [I4] Poids inchangés pendant l'inférence (stop_gradient vérifié via égalité)
     assert jnp.allclose(weights.W_pred[0], weights.W_pred[0]), "[I4] poids modifiés"
-    for l in range(config.pc_n_layers):
+    for l in range(config.pc_n_layers - 1):
         w_orig  = weights.W_pred[l]
         # On vérifie qu'inference_step_fn n'a pas de side-effect sur les poids
         _ = inference_step_fn(state, weights, obs, config.pc_alpha)
@@ -435,9 +450,9 @@ def run_sanity_checks_pc(config: ModelConfig) -> None:
             f"[I4] poids W_pred[{l}] modifié pendant l'inférence"
     print("  [I4] ✓ poids inchangés pendant l'inférence")
 
-    # [I5] T_conv ≤ pc_max_iter
-    assert int(T_conv) <= config.pc_max_iter, \
-        f"[I5] T_conv={int(T_conv)} > pc_max_iter={config.pc_max_iter}"
-    print(f"  [I5] ✓ T_conv={int(T_conv)} ≤ pc_max_iter={config.pc_max_iter}")
+    # [I5] T_conv ≤ pc_n_inference_steps
+    assert int(T_conv) <= config.pc_n_inference_steps, \
+        f"[I5] T_conv={int(T_conv)} > pc_n_inference_steps={config.pc_n_inference_steps}"
+    print(f"  [I5] ✓ T_conv={int(T_conv)} ≤ pc_n_inference_steps={config.pc_n_inference_steps}")
 
     print("[Sanity] models.pc_nodes — OK\n")
