@@ -207,13 +207,16 @@ def get_subset_dataloader(
 ) -> Iterator[Batch]:
     """
     Crée un loader d'entraînement sur n_samples exemples (pour exp2).
-    Seed distinct pour reproductibilité inter-expériences.
+    Utilise un SeedSequence dérivé pour éviter tout chevauchement avec
+    get_dataloaders (qui utilise le seed brut).
     """
-    rng = np.random.default_rng(seed)
+    # Dérive un seed distinct : spawn(0) pour la génération, spawn(1) pour le shuffle
+    ss = np.random.SeedSequence(seed).spawn(2)
+    rng = np.random.default_rng(ss[0])
     digits_pool = _load_mnist_digits()
     data = _build_dataset(digits_pool, config, n_samples, rng)
 
-    rng_iter = np.random.default_rng(seed)
+    rng_iter = np.random.default_rng(ss[1])
 
     def _iter() -> Iterator[Batch]:
         while True:

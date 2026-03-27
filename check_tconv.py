@@ -55,12 +55,12 @@ def measure_tconv(state, config, data_config, n):
 
 
 def run_check():
-    config      = ModelConfig(seed=SEED, pc_max_iter=100)
+    config      = ModelConfig(seed=SEED, pc_n_inference_steps=100)
     data_config = DataConfig(seed=SEED, batch_size=16)
 
     print("=" * 62)
     print("CHECK T_CONV — après fix compute_max_error (L∞ → MSE)")
-    print(f"  pc_tol={config.pc_tol}  pc_max_iter={config.pc_max_iter}")
+    print(f"  pc_tol={config.pc_tol}  pc_n_inference_steps={config.pc_n_inference_steps}")
     print("=" * 62)
 
     results = {}
@@ -70,7 +70,7 @@ def run_check():
 
         # Entraînement court
         loader_fn = get_subset_dataloader(data_config, n_samples=n, seed=SEED)
-        local_cfg = ModelConfig(seed=SEED, pc_max_iter=100)
+        local_cfg = ModelConfig(seed=SEED, pc_n_inference_steps=100)
         state     = create_train_state(local_cfg)
         optimizer = _build_optimizer(local_cfg)
         step_fn   = make_train_step(local_cfg, optimizer)
@@ -99,8 +99,8 @@ def run_check():
         print(f"  MSE final : mean={err_arr.mean():.6f}  "
               f"(seuil pc_tol={local_cfg.pc_tol})")
 
-        converged = (tconv_arr < local_cfg.pc_max_iter).mean() * 100
-        print(f"  Convergence avant pc_max_iter : {converged:.0f}% des batches")
+        converged = (tconv_arr < local_cfg.pc_n_inference_steps).mean() * 100
+        print(f"  Convergence avant pc_n_inference_steps : {converged:.0f}% des batches")
 
         results[n] = {
             'T_conv_mean': float(tconv_arr.mean()),
@@ -118,7 +118,7 @@ def run_check():
     print("  " + "-" * 44)
     all_variable = True
     for n, r in results.items():
-        variable = r['T_conv_std'] > 0.5 or r['T_conv_max'] < config.pc_max_iter
+        variable = r['T_conv_std'] > 0.5 or r['T_conv_max'] < config.pc_n_inference_steps
         flag = "✓" if variable else "✗ SATURÉ"
         if not variable:
             all_variable = False

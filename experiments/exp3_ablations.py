@@ -25,7 +25,7 @@ def _ablation_config(base: ModelConfig, **overrides) -> ModelConfig:
 
 ABLATIONS = {
     'full_model':      {},                              # modèle complet (référence)
-    'no_pc_1iter':     {'pc_max_iter': 1},              # A3 : 1 seule itération PC
+    'no_pc_1iter':     {'pc_n_inference_steps': 1},      # A3 : 1 seule itération PC
     'no_pc_hierarchy': {'pc_n_layers': 1},              # A5 : hiérarchie plate
     'no_var_loss':     {'lambda_var': 0.0},             # A4 : sans L_var
     'no_pc_loss':      {'lambda_pc': 0.0},              # A4b: sans L_PC
