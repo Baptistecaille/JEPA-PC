@@ -23,8 +23,8 @@ class ModelConfig(NamedTuple):
     # Predictive Coding
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
     pc_alpha:     float = 0.1     # lr de la boucle d'inférence (stable : α < 2/||H||_2 ≈ 0.22)
-    pc_tol:       float = 0.1     # critère MSE d'arrêt : force la boucle à itérer réellement
-    pc_max_iter:  int   = 200     # nb max d'itérations — laisser converger réellement
+    pc_tol:       float = 0.01    # critère MSE d'arrêt (standard PC : Rao & Ballard 1999)
+    pc_max_iter:  int   = 500     # élevé pour garantir convergence avec pc_tol=0.01
 
     # Predictor (Transformer + MLP)
     pred_k_embed: int   = 16      # dim embedding de l'horizon k
@@ -38,11 +38,13 @@ class ModelConfig(NamedTuple):
     gamma_var:    float = 1.0     # variance cible (anti-collapse)
     prec_alpha:   float = 0.0     # curriculum divisif : 0=standard, 1=divisif pur
 
-    # SIGReg — régularisation Gaussienne isotrope (LeWM, optionnel)
-    # Désactivé par défaut (lambda_sigreg=0) : la boucle PC remplace l'EMA comme
-    # mécanisme anti-collapse. Activer pour ablation : PC seul vs PC+SIGReg.
-    lambda_sigreg: float = 0.0    # 0 = désactivé ; 1e-2 recommandé pour ablation
-    sigreg_n_proj: int   = 64     # nb de projections aléatoires (Epps-Pulley)
+    # Anti-collapse — mode d'ablation (tableau comparatif contre LeWM)
+    #   "var"     : L_var = max(0, γ - Var(z))        [défaut, ce papier]
+    #   "sigreg"  : SIGReg Gaussien isotrope          [baseline LeWM]
+    #   "pc_only" : aucun terme anti-collapse explicite
+    # Le poids est toujours lambda_var, quelle que soit la valeur de ce flag.
+    anti_collapse_mode: str = "var"
+    sigreg_n_proj:      int = 64   # projections aléatoires pour anti_collapse_mode="sigreg"
 
     # EMA — volontairement absent (pas de flag use_ema=True supporté)
     # Justification : la boucle d'inférence PC (Boucle 1) est le mécanisme

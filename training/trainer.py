@@ -27,7 +27,8 @@ from models.pc_nodes import (
     PCWeights, init_pc_weights, init_pc_from_encoding, run_inference_loop,
     pc_weights_to_flat_dict, flat_dict_to_pc_weights,
 )
-from training.losses import loss_variance, sigreg_loss
+from training.losses import loss_variance
+from precision.losses import sigreg_loss as _sigreg_loss
 from models.pc_nodes import free_energy
 from data.moving_mnist import Batch, DataConfig
 from precision.module import PrecisionParams, init_precision_params, enforce_pv_constraints
@@ -198,41 +199,44 @@ def make_train_step(config: ModelConfig, optimizer: optax.GradientTransformation
             errors_jepa = (z_pred - z_target_k).reshape(-1, z_pred.shape[-1])  # (B*K, d_z)
             l_jepa = pc_loss_hybrid(errors_jepa, prec_p_, alpha=alpha_current)
 
-            # l_var sur z_pred ET z_context : protection contre collapse différentiel
-            # z_context sans l_var → encodeur collapse d'autant plus vite avec peu de données
-            # → z_target ≈ constante → NMSE artificiellement bas pour n petit
-            l_var_pred = loss_variance(z_pred.reshape(-1, z_pred.shape[-1]), config.gamma_var)
-            l_var_ctx  = loss_variance(z_context.reshape(-1, z_context.shape[-1]), config.gamma_var)
-            l_var = l_var_pred + l_var_ctx
+            # Anti-collapse — dispatché par config.anti_collapse_mode (évalué à la compilation JIT)
+            # "var"    : L_var (ce papier — par défaut)
+            # "sigreg" : SIGReg Gaussien isotrope (baseline LeWM, ablation)
+            # "pc_only": aucun terme explicite (ablation PC pur)
+            z_pred_flat = z_pred.reshape(-1, z_pred.shape[-1])
+            z_ctx_flat  = z_context.reshape(-1, z_context.shape[-1])
 
-            # L2 sur W_pred : filet de sécurité pour garder ||W_pred||_2 < sqrt(2/α-1) ≈ 4.36
-            # Empêche la croissance lente accumulée par Adam de franchir le seuil de stabilité.
+            if config.anti_collapse_mode == "var":
+                l_collapse = (
+                    loss_variance(z_pred_flat, config.gamma_var)
+                    + loss_variance(z_ctx_flat,  config.gamma_var)
+                )
+            elif config.anti_collapse_mode == "sigreg":
+                sk_a = jax.random.fold_in(state.key, state.step)
+                sk_b = jax.random.fold_in(state.key, state.step + jnp.int32(1_000_000))
+                l_collapse = (
+                    _sigreg_loss(z_pred_flat, sk_a, config.sigreg_n_proj)
+                    + _sigreg_loss(z_ctx_flat,  sk_b, config.sigreg_n_proj)
+                )
+            else:   # "pc_only"
+                l_collapse = jnp.array(0.0, dtype=jnp.float32)
+
+            # L2 sur W_pred : filet de sécurité pour garder ||W_pred||_2 < sqrt(2/α-1)
             l2_pc = jnp.mean(jnp.stack([jnp.mean(w ** 2) for w in pc_w_.W_pred]))
 
-            # SIGReg (désactivé par défaut, lambda_sigreg=0 → aucun overhead)
-            # Clé dérivée de (state.key, step) : varie à chaque pas sans muter l'état.
-            sk_sigreg = jax.random.fold_in(state.key, state.step)
-            l_sigreg = sigreg_loss(
-                z_context.reshape(-1, z_context.shape[-1]),
-                sk_sigreg,
-                config.sigreg_n_proj,
-            )
-
             total = (l_jepa
-                     + config.lambda_pc     * l_pc
-                     + config.lambda_var    * l_var
-                     + config.lambda_pc_l2  * l2_pc
-                     + config.lambda_sigreg * l_sigreg)
+                     + config.lambda_pc    * l_pc
+                     + config.lambda_var   * l_collapse
+                     + config.lambda_pc_l2 * l2_pc)
 
             aux = {
-                'loss_total':  total,
-                'loss_jepa':   l_jepa,
-                'loss_pc':     l_pc,
-                'loss_var':    l_var,
-                'loss_sigreg': l_sigreg,
-                'T_conv':      T_conv,
-                'pc_error':    final_err,
-                'prec_alpha':  alpha_current,
+                'loss_total':   total,
+                'loss_jepa':    l_jepa,
+                'loss_pc':      l_pc,
+                'loss_collapse': l_collapse,
+                'T_conv':       T_conv,
+                'pc_error':     final_err,
+                'prec_alpha':   alpha_current,
             }
             return total, aux
 
@@ -369,19 +373,14 @@ def train(
         if step % log_every == 0:
             history['train_loss'].append(float(metrics['loss_total']))
             history['T_conv'].append(float(metrics['T_conv']))
-            sigreg_str = (
-                f"  sigreg={float(metrics['loss_sigreg']):.4f}"
-                if config.lambda_sigreg > 0.0 else ""
-            )
             print(
                 f"  step={step:5d}  "
                 f"loss={float(metrics['loss_total']):.4f}  "
                 f"jepa={float(metrics['loss_jepa']):.4f}  "
                 f"pc={float(metrics['loss_pc']):.4f}  "
-                f"var={float(metrics['loss_var']):.4f}  "
+                f"collapse={float(metrics['loss_collapse']):.4f}  "
                 f"T_conv={int(metrics['T_conv']):3d}  "
                 f"α={float(metrics['prec_alpha']):.3f}"
-                + sigreg_str
             )
 
         if step % eval_every == 0 and step > 0:

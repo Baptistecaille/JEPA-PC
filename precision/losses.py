@@ -8,6 +8,7 @@ Invariants:
   - pc_loss_standard(errors) == loss_jepa quand alpha=0 dans pc_loss_hybrid
 === FIN SPEC ===
 """
+import jax
 import jax.numpy as jnp
 from typing import Optional
 from jax import Array
@@ -77,6 +78,38 @@ def pc_loss_divisive(
 # ---------------------------------------------------------------------------
 # Perte hybride — curriculum standard → divisive
 # ---------------------------------------------------------------------------
+
+def sigreg_loss(
+    z: Array,
+    key: jax.random.PRNGKey,
+    n_projections: int = 64,
+) -> Array:
+    """
+    SIGReg — régularisation Gaussienne isotrope (LeWM, Epps-Pulley).
+
+    Pour chaque direction aléatoire u ~ Unif(S^{d-1}) :
+        s = z @ u  (projection scalaire)
+        pénalise E[s] ≠ 0  et  Var[s] ≠ 1
+
+    L_SIGReg = mean_u [ E[s]² + (std[s] - 1)² ]
+
+    Alternative à L_var pour l'ablation anti-collapse :
+      anti_collapse_mode="var"     → loss_variance  (par défaut)
+      anti_collapse_mode="sigreg"  → sigreg_loss    (baseline LeWM)
+      anti_collapse_mode="pc_only" → aucun terme
+
+    z            : (N, d_z) — représentations à régulariser
+    key          : PRNGKey  — doit varier à chaque step (utiliser fold_in)
+    n_projections: int      — config.sigreg_n_proj
+    """
+    d_z = z.shape[-1]
+    directions = jax.random.normal(key, (n_projections, d_z))
+    directions = directions / jnp.linalg.norm(directions, axis=-1, keepdims=True)
+    projections = z @ directions.T                             # (N, n_proj)
+    mu    = jnp.mean(projections, axis=0)                      # (n_proj,)
+    sigma = jnp.std(projections, axis=0)                       # (n_proj,)
+    return jnp.mean(mu ** 2 + (sigma - 1.0) ** 2)
+
 
 def pc_loss_hybrid(
     errors: Array,           # shape (batch, n_units)

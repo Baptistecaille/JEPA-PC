@@ -103,6 +103,51 @@ def compute_all_metrics(
     }
 
 
+# ---------------------------------------------------------------------------
+# Violation-of-Expectation (VoE) — signal de surprise PC
+# ---------------------------------------------------------------------------
+
+def surprise_score(final_err: jnp.ndarray) -> jnp.ndarray:
+    """
+    Score de surprise = énergie libre résiduelle après convergence PC.
+
+    C'est la quantité retournée par run_inference_loop comme `final_err`
+    (compute_max_error au point fixe x*). Elle mesure à quel point le modèle
+    PC n'a pas réussi à expliquer l'observation via sa structure hiérarchique :
+      - séquence normale → F faible (le modèle la "comprend")
+      - séquence impossible → F élevé (le modèle est "surpris")
+
+    Plus élevé = plus surprenant.
+
+    final_err : scalaire float32 — MSE résiduelle à convergence
+    return    : scalaire float32 (identité, pour la sémantique)
+    """
+    return final_err
+
+
+def violation_of_expectation_score(
+    normal_err: jnp.ndarray,
+    impossible_err: jnp.ndarray,
+) -> jnp.ndarray:
+    """
+    Ratio de surprise : séquences impossibles vs normales.
+
+    VoE > 1 : le modèle est correctement plus surpris par les violations.
+    VoE ≈ 1 : le modèle ne discrimine pas.
+    VoE < 1 : le modèle préfère les séquences impossibles (pathologie).
+
+    Protocole Moving MNIST :
+      - séquences normales    : trajectoires continues d'un chiffre
+      - séquences impossibles : saut abrupt de position (discontinuité spatiale)
+                                ou changement d'identité mid-séquence
+
+    normal_err    : float32 — surprise_score sur batch de séquences normales
+    impossible_err: float32 — surprise_score sur batch de séquences impossibles
+    return        : scalaire float32 — ratio impossible/normal
+    """
+    return impossible_err / (normal_err + 1e-8)
+
+
 def compute_per_horizon_nmse(
     z_pred: jnp.ndarray,
     z_target: jnp.ndarray,
