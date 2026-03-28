@@ -75,6 +75,7 @@ def compute_all_metrics(
     z_target: jnp.ndarray,
     pc_state: 'PCHierarchyState',
     T_conv: jnp.ndarray,
+    final_err: jnp.ndarray | None = None,
 ) -> dict:
     """
     Agrège toutes les métriques en un dict pour le logging.
@@ -83,6 +84,7 @@ def compute_all_metrics(
     z_target  : (B, K, d_z)
     pc_state  : PCHierarchyState
     T_conv    : scalaire ou (B,)
+    final_err : scalaire optionnel — erreur PC résiduelle après inférence
 
     Deux collapse scores distincts :
       collapse_pred : structuration de l'espace des prédictions (predictor)
@@ -94,13 +96,16 @@ def compute_all_metrics(
     z_pred_flat = z_pred.reshape(-1, z_pred.shape[-1])   # (B*K, d_z)
     z_ctx_flat  = pc_state.representations[0]             # (B, d_z) — niveau 0 = encodeur
 
-    return {
+    metrics = {
         'nmse':          nmse(z_pred, z_target),
         'collapse_pred': collapse_score(z_pred_flat),    # structuration des prédictions
         'collapse_ctx':  collapse_score(z_ctx_flat),     # richesse espace encodé ← principal
         'T_conv_mean':   jnp.mean(jnp.array(T_conv, dtype=jnp.float32)),
         'T_conv_max':    jnp.max(jnp.array(T_conv, dtype=jnp.float32)),
     }
+    if final_err is not None:
+        metrics['pc_error_mean'] = jnp.mean(jnp.array(final_err, dtype=jnp.float32))
+    return metrics
 
 
 # ---------------------------------------------------------------------------

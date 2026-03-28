@@ -318,7 +318,7 @@ def evaluate(
         z_target  = apply_encoder(enc_w, batch.target)
 
         init_pc_state = init_pc_from_encoding(z_context[:, -1, :], pc_w, config)
-        pc_converged, T_conv, _ = run_inference_loop(
+        pc_converged, T_conv, final_err = run_inference_loop(
             init_pc_state, pc_w, z_context[:, -1, :], config
         )
 
@@ -335,7 +335,9 @@ def evaluate(
         z_pred = apply_predictor(pred_w, z_pred_input, config)
         z_target_k = z_target[:, :config.pred_K, :]
 
-        metrics = compute_all_metrics(z_pred, z_target_k, pc_converged, T_conv)
+        metrics = compute_all_metrics(
+            z_pred, z_target_k, pc_converged, T_conv, final_err=final_err
+        )
         all_metrics.append(metrics)
 
     # Moyenne sur les batches
