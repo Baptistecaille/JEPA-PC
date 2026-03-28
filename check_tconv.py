@@ -93,7 +93,7 @@ def _train_short_run(n, config, data_config):
 
 
 def run_check(base_config=None, sweep_tols=None, sweep_steps=None):
-    config = base_config or ModelConfig(seed=SEED, pc_n_inference_steps=100)
+    config = base_config or ModelConfig(seed=SEED, pc_n_inference_steps=1000)
     data_config = DataConfig(seed=SEED, batch_size=16)
     sweep_tols = sweep_tols or (config.pc_tol,)
     sweep_steps = sweep_steps or (config.pc_n_inference_steps,)
