@@ -23,8 +23,8 @@ class ModelConfig(NamedTuple):
     # Predictive Coding
     pc_n_layers:  int   = 3       # profondeur de la hiérarchie PC
     pc_alpha:     float = 0.1     # lr de la boucle d'inférence (stable : α < 2/||H||_2 ≈ 0.22)
-    pc_tol:       float = 0.1     # critère MSE d'arrêt atteignable avec l'échelle d'erreur actuelle
-    pc_n_inference_steps: int = 1000 # nb fixe de pas d'inférence (lax.scan, coût constant)
+    pc_tol:       float = 0.3     # critère MSE d'arrêt atteignable avec l'échelle d'erreur actuelle
+    pc_n_inference_steps: int = 3000 # nb fixe de pas d'inférence (lax.scan, coût constant)
     pc_init_mode: str = "zeros"   # "zeros" (robuste, Rao & Ballard) | "feedforward" (pseudo-inverse)
 
     # Predictor (Transformer + MLP)

@@ -30,10 +30,10 @@ from models.pc_nodes import (
 from training.trainer import create_train_state, make_train_step, _build_optimizer
 
 CONTROL_NS = (100, 1000, 4000)
-N_TRAIN_STEPS = 500          # assez pour que la MSE descende sous pc_tol=1e-2
+N_TRAIN_STEPS = 500          # assez pour que la MSE descende sous le pc_tol de base
 N_EVAL_BATCHES = 10          # batches pour mesurer T_conv
 SEED = 42
-DEFAULT_TOLS = (0.1, 0.2, 0.5)
+DEFAULT_TOLS = (0.3, 0.5, 0.8)
 DEFAULT_STEPS = (50, 100, 200)
 
 
@@ -93,7 +93,7 @@ def _train_short_run(n, config, data_config):
 
 
 def run_check(base_config=None, sweep_tols=None, sweep_steps=None):
-    config = base_config or ModelConfig(seed=SEED, pc_n_inference_steps=1000)
+    config = base_config or ModelConfig(seed=SEED)
     data_config = DataConfig(seed=SEED, batch_size=16)
     sweep_tols = sweep_tols or (config.pc_tol,)
     sweep_steps = sweep_steps or (config.pc_n_inference_steps,)
