@@ -47,6 +47,7 @@ class Batch(NamedTuple):
 
 # Cache module-level : MNIST chargé une seule fois par processus
 _MNIST_DIGITS_CACHE: np.ndarray | None = None
+_MNIST_NPZ_URL = "https://storage.googleapis.com/cvdf-datasets/mnist/mnist.npz"
 
 
 def _load_mnist_digits() -> np.ndarray:
@@ -55,9 +56,9 @@ def _load_mnist_digits() -> np.ndarray:
     Ordre de priorité :
       1. Cache mémoire (même processus)
       2. ~/.keras/datasets/mnist.npz (téléchargé par keras, chargé via numpy pur)
-      3. tensorflow.keras.datasets.mnist
-      4. torchvision MNIST
-      5. Placeholders synthétiques (CI / pas d'internet)
+            3. Téléchargement direct du .npz MNIST (sans TensorFlow)
+            4. torchvision MNIST
+            5. Placeholders synthétiques (CI / pas d'internet)
     Shape : (N, 28, 28) uint8
 
     N'avance JAMAIS le rng de l'appelant : la graine des placeholders est fixe (0),
@@ -69,22 +70,25 @@ def _load_mnist_digits() -> np.ndarray:
 
     import os
 
-    # Essai 1 : fichier keras déjà sur disque → numpy pur, pas de TF requis
+    # Essai 1 : fichier local déjà sur disque → numpy pur
     keras_path = os.path.expanduser('~/.keras/datasets/mnist.npz')
     if os.path.exists(keras_path):
         try:
-            data   = np.load(keras_path)
-            digits = np.concatenate([data['x_train'], data['x_test']], axis=0)
+            with np.load(keras_path) as data:
+                digits = np.concatenate([data['x_train'], data['x_test']], axis=0)
             _MNIST_DIGITS_CACHE = digits.astype(np.uint8)
             return _MNIST_DIGITS_CACHE
         except Exception:
             pass   # fichier corrompu → essais suivants
 
-    # Essai 2 : TensorFlow (télécharge et met en cache dans ~/.keras/)
+    # Essai 2 : téléchargement direct du fichier MNIST .npz (sans TensorFlow)
     try:
-        import tensorflow as tf
-        (x_train, _), (x_test, _) = tf.keras.datasets.mnist.load_data()
-        digits = np.concatenate([x_train, x_test], axis=0)
+        from urllib.request import urlretrieve
+        os.makedirs(os.path.dirname(keras_path), exist_ok=True)
+        if not os.path.exists(keras_path):
+            urlretrieve(_MNIST_NPZ_URL, keras_path)
+        with np.load(keras_path) as data:
+            digits = np.concatenate([data['x_train'], data['x_test']], axis=0)
     except Exception:
         # Essai 3 : torchvision
         try:
